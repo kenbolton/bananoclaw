@@ -40,15 +40,18 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 When spawning agents with the Task tool:
 - **Planning (ALWAYS Opus):** Use `model="opus"` for Plan agents, architecture decisions, complex reasoning
-- **Execution (discuss first):** For implementation, tests, and file operations, discuss model choice with user before proceeding
+- **Execution (Sonnet or Haiku):** Use `model="sonnet"` (currently Sonnet 4.5) for implementation, tests, and file operations. Use `model="haiku"` (currently Haiku 4.5) for lightweight/fast tasks (simple lookups, formatting, single-step actions)
 
 Example:
 ```python
 # Planning - ALWAYS use Opus
 Task(subagent_type="Plan", model="opus", prompt="Design authentication system")
 
-# Execution - discuss with user first
-Task(subagent_type="general-purpose", prompt="Implement the plan")
+# Execution - use Sonnet
+Task(subagent_type="general-purpose", model="sonnet", prompt="Implement the plan")
+
+# Lightweight action - use Haiku
+Task(subagent_type="general-purpose", model="haiku", prompt="Format this JSON")
 ```
 
 ## Memory

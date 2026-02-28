@@ -6,8 +6,12 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  SIGNAL_ACCOUNT,
+  SIGNAL_SOCKET_PATH,
   TRIGGER_PATTERN,
 } from './config.js';
+import { GmailChannel } from './channels/gmail.js';
+import { SignalChannel } from './channels/signal.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -478,6 +482,28 @@ async function main(): Promise<void> {
   whatsapp = new WhatsAppChannel(channelOpts);
   channels.push(whatsapp);
   await whatsapp.connect();
+
+  const gmail = new GmailChannel(channelOpts);
+  channels.push(gmail);
+  try {
+    await gmail.connect();
+  } catch (err) {
+    logger.warn({ err }, 'Gmail channel failed to connect, continuing without it');
+  }
+
+  if (SIGNAL_ACCOUNT) {
+    const signal = new SignalChannel({
+      ...channelOpts,
+      accountNumber: SIGNAL_ACCOUNT,
+      socketPath: SIGNAL_SOCKET_PATH,
+    });
+    channels.push(signal);
+    try {
+      await signal.connect();
+    } catch (err) {
+      logger.warn({ err }, 'Signal channel failed to connect, continuing without it');
+    }
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

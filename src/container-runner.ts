@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -60,6 +61,7 @@ function buildVolumeMounts(
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
+  const homeDir = os.homedir();
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
@@ -150,6 +152,31 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Gmail credentials directory (for Gmail MCP inside the container)
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
+
+  // gogcli config directory (Google Workspace: Gmail, Calendar, Drive, etc.)
+  // macOS stores config in ~/Library/Application Support/gogcli/
+  // Linux stores config in ~/.config/gogcli/
+  // Container expects Linux path regardless of host OS
+  const gogcliDirMac = path.join(homeDir, 'Library', 'Application Support', 'gogcli');
+  const gogcliDirLinux = path.join(homeDir, '.config', 'gogcli');
+  const gogcliDir = fs.existsSync(gogcliDirMac) ? gogcliDirMac : gogcliDirLinux;
+  if (fs.existsSync(gogcliDir)) {
+    mounts.push({
+      hostPath: gogcliDir,
+      containerPath: '/home/node/.config/gogcli',
+      readonly: false, // gog may need to refresh OAuth tokens
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -215,6 +242,12 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Pass gogcli env vars for Google Workspace access
+  const gogEnvVars = readEnvFile(['GOG_KEYRING_BACKEND', 'GOG_KEYRING_PASSWORD', 'GOG_ACCOUNT']);
+  for (const [key, value] of Object.entries(gogEnvVars)) {
+    args.push('-e', `${key}=${value}`);
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),

@@ -34,6 +34,23 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## Model Selection Strategy
+
+**IMPORTANT:** Always use Opus for planning tasks.
+
+When spawning agents with the Task tool:
+- **Planning (ALWAYS Opus):** Use `model="opus"` for Plan agents, architecture decisions, complex reasoning
+- **Execution (discuss first):** For implementation, tests, and file operations, discuss model choice with user before proceeding
+
+Example:
+```python
+# Planning - ALWAYS use Opus
+Task(subagent_type="Plan", model="opus", prompt="Design authentication system")
+
+# Execution - discuss with user first
+Task(subagent_type="general-purpose", prompt="Implement the plan")
+```
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
@@ -42,6 +59,10 @@ When you learn something important:
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
+
+## Email Notifications
+
+When you receive an email notification (messages starting with `[Email from ...`), inform the user about it but do NOT reply to the email unless specifically asked. You have Gmail tools available — use them only when the user explicitly asks you to reply, forward, or take action on an email.
 
 ## WhatsApp Formatting (and other messaging apps)
 

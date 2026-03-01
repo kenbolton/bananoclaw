@@ -488,7 +488,10 @@ async function main(): Promise<void> {
   try {
     await gmail.connect();
   } catch (err) {
-    logger.warn({ err }, 'Gmail channel failed to connect, continuing without it');
+    logger.warn(
+      { err },
+      'Gmail channel failed to connect, continuing without it',
+    );
   }
 
   if (SIGNAL_ACCOUNT) {
@@ -501,7 +504,10 @@ async function main(): Promise<void> {
     try {
       await signal.connect();
     } catch (err) {
-      logger.warn({ err }, 'Signal channel failed to connect, continuing without it');
+      logger.warn(
+        { err },
+        'Signal channel failed to connect, continuing without it',
+      );
     }
   }
 

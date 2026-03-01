@@ -166,7 +166,12 @@ function buildVolumeMounts(
   // macOS stores config in ~/Library/Application Support/gogcli/
   // Linux stores config in ~/.config/gogcli/
   // Container expects Linux path regardless of host OS
-  const gogcliDirMac = path.join(homeDir, 'Library', 'Application Support', 'gogcli');
+  const gogcliDirMac = path.join(
+    homeDir,
+    'Library',
+    'Application Support',
+    'gogcli',
+  );
   const gogcliDirLinux = path.join(homeDir, '.config', 'gogcli');
   const gogcliDir = fs.existsSync(gogcliDirMac) ? gogcliDirMac : gogcliDirLinux;
   if (fs.existsSync(gogcliDir)) {
@@ -244,7 +249,11 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Pass gogcli env vars for Google Workspace access
-  const gogEnvVars = readEnvFile(['GOG_KEYRING_BACKEND', 'GOG_KEYRING_PASSWORD', 'GOG_ACCOUNT']);
+  const gogEnvVars = readEnvFile([
+    'GOG_KEYRING_BACKEND',
+    'GOG_KEYRING_PASSWORD',
+    'GOG_ACCOUNT',
+  ]);
   for (const [key, value] of Object.entries(gogEnvVars)) {
     args.push('-e', `${key}=${value}`);
   }

@@ -266,18 +266,19 @@ export class SignalChannel implements Channel {
   }
 
   private handleNotification(notification: JsonRpcNotification): void {
-    if (notification.method !== 'receive' && notification.method !== 'sync') return;
-  
+    if (notification.method !== 'receive' && notification.method !== 'sync')
+      return;
+
     const envelope = notification.params?.envelope as
       | SignalEnvelope
       | undefined;
     if (!envelope) return;
-  
+
     // Handle both regular messages and sync messages (self-sent)
     let dataMessage;
     let source;
     let senderName;
-    
+
     if (envelope.syncMessage?.sentMessage) {
       // Sync message (your own message from another device)
       dataMessage = envelope.syncMessage.sentMessage;
@@ -291,22 +292,20 @@ export class SignalChannel implements Channel {
     } else {
       return;
     }
-  
+
     if (!dataMessage?.message) return;
-  
+
     const groupId = dataMessage.groupInfo?.groupId;
-    const chatJid = groupId
-      ? `signal:group:${groupId}`
-      : `signal:${source}`;
+    const chatJid = groupId ? `signal:group:${groupId}` : `signal:${source}`;
     const isGroup = !!groupId;
-  
+
     const timestamp = dataMessage.timestamp
       ? new Date(dataMessage.timestamp).toISOString()
       : new Date().toISOString();
-  
+
     // Always emit chat metadata for discovery
     this.opts.onChatMetadata(chatJid, timestamp, undefined, 'signal', isGroup);
-  
+
     // Deliver message for registered groups
     const groups = this.opts.registeredGroups();
     if (groups[chatJid]) {
@@ -323,7 +322,10 @@ export class SignalChannel implements Channel {
     }
   }
 
-  private rpcCall(method: string, params: Record<string, unknown>): Promise<unknown> {
+  private rpcCall(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.connected) {
         reject(new Error('Signal socket not connected'));

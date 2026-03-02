@@ -7,6 +7,7 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
+    fonts-noto-cjk \
     fonts-noto-color-emoji \
     libgbm1 \
     libnss3 \
@@ -23,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -54,16 +56,16 @@ RUN npm run build
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
-# Create entrypoint script
-# Secrets are passed via stdin JSON — temp file is deleted immediately after Node reads it
-# Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Copy entrypoint script
+# Starts as root to shadow .env via mount --bind, then drops to RUN_UID/RUN_GID (host user).
+# Secrets are passed via stdin JSON — never read from disk inside the container.
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
 
-# Switch to non-root user (required for --dangerously-skip-permissions)
-USER node
+# Do NOT set USER — entrypoint starts as root for mount --bind, then drops privileges.
 
 # Set working directory to group workspace
 WORKDIR /workspace/group

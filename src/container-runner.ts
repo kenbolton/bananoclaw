@@ -236,7 +236,12 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_AUTH_TOKEN',
+  ]);
 }
 
 function buildContainerArgs(
@@ -258,14 +263,15 @@ function buildContainerArgs(
     args.push('-e', `${key}=${value}`);
   }
 
-  // Run as host user so bind-mounted files are accessible.
-  // Skip when running as root (uid 0), as the container's node user (uid 1000),
-  // or when getuid is unavailable (native Windows without WSL).
+  // Pass host UID/GID for privilege drop in entrypoint.
+  // The entrypoint starts as root (for .env shadowing via mount --bind),
+  // then drops to these IDs so bind-mounted files are accessible.
+  // Skip when running as root (uid 0) or when getuid is unavailable.
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
+  if (hostUid != null && hostUid !== 0) {
+    args.push('-e', `RUN_UID=${hostUid}`);
+    args.push('-e', `RUN_GID=${hostGid}`);
   }
 
   for (const mount of mounts) {

@@ -496,10 +496,6 @@ async function main(): Promise<void> {
     channels.push(channel);
     await channel.connect();
   }
-  if (channels.length === 0) {
-    logger.fatal('No channels connected');
-    process.exit(1);
-  }
 
   const gmail = new GmailChannel(channelOpts);
   channels.push(gmail);
@@ -527,6 +523,11 @@ async function main(): Promise<void> {
         'Signal channel failed to connect, continuing without it',
       );
     }
+  }
+
+  if (channels.length === 0) {
+    logger.fatal('No channels connected');
+    process.exit(1);
   }
 
   // Start subsystems (independently of connection handler)

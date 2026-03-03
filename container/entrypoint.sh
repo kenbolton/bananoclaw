@@ -13,7 +13,7 @@ if [ "$(id -u)" = "0" ]; then
   UID_TO_USE="${RUN_UID:-1000}"
   GID_TO_USE="${RUN_GID:-1000}"
   export HOME=/home/node
-  exec /usr/bin/setpriv --reuid="$UID_TO_USE" --regid="$GID_TO_USE" --init-groups /app/entrypoint.sh
+  exec /usr/bin/setpriv --reuid="$UID_TO_USE" --regid="$GID_TO_USE" --clear-groups /app/entrypoint.sh
 fi
 
 # Running as target user: compile and execute

@@ -32,6 +32,8 @@ Run `/update-nanoclaw` in Claude Code.
 
 **Validation**: runs `npm run build` and `npm test`.
 
+**Container rebuild**: if any `container/` files changed, offers to rebuild the agent container image. Prunes the builder cache first to avoid stale layers (Apple Container caches aggressively).
+
 **Breaking changes check**: after validation, reads CHANGELOG.md for any `[BREAKING]` entries introduced by the update. If found, shows each breaking change and offers to run the recommended skill to migrate.
 
 ## Rollback
@@ -181,6 +183,27 @@ If build fails:
 - Only fix issues clearly caused by the merge (missing imports, type mismatches from merged code).
 - Do not refactor unrelated code.
 - If unclear, ask the user before making changes.
+
+# Step 5b: Container rebuild (if container/ changed)
+After validation, check whether any container files were modified by the update:
+- `git diff --name-only <backup-tag-from-step-1>..HEAD -- container/`
+
+If no container files changed: skip this step silently.
+
+If container files changed:
+- Tell the user which files changed.
+- Ask (AskUserQuestion) whether to rebuild the container image now.
+  - Option A: **Rebuild now** (recommended)
+  - Option B: **Skip** — they'll rebuild manually later
+
+If user chooses Rebuild:
+- Prune the builder cache first (Apple Container caches aggressively; stale layers cause silent failures):
+  - `container builder stop 2>/dev/null; container builder delete 2>/dev/null`
+- Run: `./container/build.sh`
+- If the build fails, show the error and tell the user to investigate before restarting the service. Do not attempt to fix Dockerfile issues automatically.
+- If the build succeeds, note it in the Step 7 summary.
+
+If user chooses Skip: note in the summary that a container rebuild is still needed.
 
 # Step 6: Breaking changes check
 After validation succeeds, check if the update introduced any breaking changes.

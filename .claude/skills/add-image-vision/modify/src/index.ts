@@ -5,9 +5,6 @@ import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
-  SIGNAL_ACCOUNT,
-  SIGNAL_SOCKET_PATH,
-  TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
 import './channels/index.js';
@@ -15,8 +12,6 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import { GmailChannel } from './channels/gmail.js';
-import { SignalChannel } from './channels/signal.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -34,7 +29,6 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
-  getRegisteredGroup,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -47,7 +41,6 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
-import { StatusTracker } from './status-tracker.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -56,6 +49,7 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { parseImageReferences } from './image.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -69,7 +63,6 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
-const activeTrackers = new Map<string, StatusTracker>();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -178,7 +171,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = formatMessages(missedMessages);
+  const imageAttachments = parseImageReferences(missedMessages);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -206,21 +200,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  // Create status tracker if the channel supports reactions
-  const tracker = channel.reactToLatestMessage
-    ? new StatusTracker((emoji) =>
-        channel.reactToLatestMessage!(chatJid, emoji),
-      )
-    : null;
-  if (tracker) activeTrackers.set(chatJid, tracker);
-
   await channel.setTyping?.(chatJid, true);
-  await tracker?.advance('thinking');
-
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, prompt, chatJid, imageAttachments, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -231,7 +215,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await tracker?.advance('working');
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
@@ -252,10 +235,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    await tracker?.advance('failed');
-    tracker?.destroy();
-    activeTrackers.delete(chatJid);
-
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -275,10 +254,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
-  await tracker?.advance('done');
-  tracker?.destroy();
-  activeTrackers.delete(chatJid);
-
   return true;
 }
 
@@ -286,6 +261,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  imageAttachments: Array<{ relativePath: string; mediaType: string }>,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
@@ -337,6 +313,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        ...(imageAttachments.length > 0 && { imageAttachments }),
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -435,7 +412,7 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
+          const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -550,35 +527,6 @@ async function main(): Promise<void> {
     channels.push(channel);
     await channel.connect();
   }
-
-  const gmail = new GmailChannel(channelOpts);
-  channels.push(gmail);
-  try {
-    await gmail.connect();
-  } catch (err) {
-    logger.warn(
-      { err },
-      'Gmail channel failed to connect, continuing without it',
-    );
-  }
-
-  if (SIGNAL_ACCOUNT) {
-    const signal = new SignalChannel({
-      ...channelOpts,
-      accountNumber: SIGNAL_ACCOUNT,
-      socketPath: SIGNAL_SOCKET_PATH,
-    });
-    channels.push(signal);
-    try {
-      await signal.connect();
-    } catch (err) {
-      logger.warn(
-        { err },
-        'Signal channel failed to connect, continuing without it',
-      );
-    }
-  }
-
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
@@ -606,15 +554,6 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
-    },
-    sendReaction: async (jid, messageId, emoji) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) return;
-      if (messageId && channel.sendReaction) {
-        await channel.sendReaction(jid, messageId, emoji);
-      } else if (channel.reactToLatestMessage) {
-        await channel.reactToLatestMessage(jid, emoji);
-      }
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

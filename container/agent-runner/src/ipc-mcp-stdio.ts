@@ -280,6 +280,29 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'react_to_message',
+  'Send an emoji reaction to a message in the current chat. Use this to acknowledge, express emotion, or signal status without sending a text reply.',
+  {
+    emoji: z.string().describe('The emoji to react with (e.g., "👍", "❤️", "✅")'),
+    message_id: z.string().optional().describe('The message ID to react to. Omit to react to the most recent message.'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Reaction sent.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

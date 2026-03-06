@@ -2,6 +2,7 @@ import net from 'net';
 import path from 'path';
 
 import { ASSISTANT_NAME } from '../config.js';
+import { getLatestMessage, storeReaction } from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -31,22 +32,28 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
+interface SignalQuote {
+  id?: number;
+  author?: string;
+  authorName?: string;
+  text?: string;
+}
+
+interface SignalDataMessage {
+  timestamp?: number;
+  message?: string;
+  groupInfo?: { groupId: string; type?: string };
+  quote?: SignalQuote;
+}
+
 interface SignalEnvelope {
   source?: string;
   sourceName?: string;
   sourceNumber?: string;
   timestamp?: number;
-  dataMessage?: {
-    timestamp?: number;
-    message?: string;
-    groupInfo?: { groupId: string; type?: string };
-  };
+  dataMessage?: SignalDataMessage;
   syncMessage?: {
-    sentMessage?: {
-      timestamp?: number;
-      message?: string;
-      groupInfo?: { groupId: string; type?: string };
-    };
+    sentMessage?: SignalDataMessage;
   };
   typingMessage?: {
     action?: string;
@@ -182,6 +189,88 @@ export class SignalChannel implements Channel {
     logger.info('Signal channel disconnected');
   }
 
+  async sendReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+    // messageId format: "signal-{timestamp}"
+    const ts = messageId.startsWith('signal-')
+      ? parseInt(messageId.slice('signal-'.length), 10)
+      : parseInt(messageId, 10);
+    if (!ts || isNaN(ts)) {
+      logger.warn({ jid, messageId }, 'Cannot send Signal reaction: invalid message ID');
+      return;
+    }
+
+    try {
+      if (jid.startsWith('signal:group:')) {
+        const groupId = jid.slice('signal:group:'.length);
+        await this.rpcCall('sendMessageReaction', {
+          account: this.opts.accountNumber,
+          groupId,
+          emoji,
+          targetAuthor: this.opts.accountNumber,
+          targetSentTimestamp: ts,
+          remove: false,
+        });
+      } else {
+        const recipient = jid.slice('signal:'.length);
+        await this.rpcCall('sendMessageReaction', {
+          account: this.opts.accountNumber,
+          recipient: [recipient],
+          emoji,
+          targetAuthor: this.opts.accountNumber,
+          targetSentTimestamp: ts,
+          remove: false,
+        });
+      }
+      storeReaction({ chatJid: jid, messageId, emoji, timestamp: new Date().toISOString() });
+      logger.debug({ jid, messageId, emoji }, 'Signal reaction sent');
+    } catch (err) {
+      logger.debug({ jid, messageId, emoji, err }, 'Failed to send Signal reaction');
+    }
+  }
+
+  async reactToLatestMessage(jid: string, emoji: string): Promise<void> {
+    const latest = getLatestMessage(jid);
+    if (!latest) return;
+
+    // Determine the author of the message being reacted to
+    const targetAuthor = latest.is_from_me
+      ? this.opts.accountNumber
+      : latest.sender;
+
+    const ts = latest.id.startsWith('signal-')
+      ? parseInt(latest.id.slice('signal-'.length), 10)
+      : parseInt(latest.id, 10);
+    if (!ts || isNaN(ts)) return;
+
+    try {
+      if (jid.startsWith('signal:group:')) {
+        const groupId = jid.slice('signal:group:'.length);
+        await this.rpcCall('sendMessageReaction', {
+          account: this.opts.accountNumber,
+          groupId,
+          emoji,
+          targetAuthor,
+          targetSentTimestamp: ts,
+          remove: false,
+        });
+      } else {
+        const recipient = jid.slice('signal:'.length);
+        await this.rpcCall('sendMessageReaction', {
+          account: this.opts.accountNumber,
+          recipient: [recipient],
+          emoji,
+          targetAuthor,
+          targetSentTimestamp: ts,
+          remove: false,
+        });
+      }
+      storeReaction({ chatJid: jid, messageId: latest.id, emoji, timestamp: new Date().toISOString() });
+      logger.debug({ jid, messageId: latest.id, emoji }, 'Signal reaction sent to latest message');
+    } catch (err) {
+      logger.debug({ jid, emoji, err }, 'Failed to send Signal reaction to latest message');
+    }
+  }
+
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     try {
       if (jid.startsWith('signal:group:')) {
@@ -306,6 +395,12 @@ export class SignalChannel implements Channel {
     // Always emit chat metadata for discovery
     this.opts.onChatMetadata(chatJid, timestamp, undefined, 'signal', isGroup);
 
+    // Extract reply-threading quote fields if present
+    const quote = dataMessage.quote;
+    const quotedMessageId = quote?.id != null ? `signal-${quote.id}` : undefined;
+    const quoteSenderName = quote?.authorName || quote?.author || undefined;
+    const quoteContent = quote?.text || undefined;
+
     // Deliver message for registered groups
     const groups = this.opts.registeredGroups();
     if (groups[chatJid]) {
@@ -318,6 +413,9 @@ export class SignalChannel implements Channel {
         timestamp,
         is_from_me: source === this.opts.accountNumber,
         is_bot_message: false,
+        quoted_message_id: quotedMessageId,
+        quote_sender_name: quoteSenderName,
+        quote_content: quoteContent,
       });
     }
   }

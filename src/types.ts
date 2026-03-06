@@ -51,6 +51,16 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  quoted_message_id?: string;
+  quote_sender_name?: string;
+  quote_content?: string;
+}
+
+export interface Reaction {
+  chatJid: string;
+  messageId: string;
+  emoji: string;
+  timestamp: string;
 }
 
 export interface ScheduledTask {
@@ -90,6 +100,10 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send a reaction to a specific message.
+  sendReaction?(chatJid: string, messageId: string, emoji: string): Promise<void>;
+  // Optional: react to the most recent message in the chat.
+  reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

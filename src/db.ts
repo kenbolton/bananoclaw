@@ -7,6 +7,7 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   NewMessage,
+  Reaction,
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
@@ -32,10 +33,21 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      quoted_message_id TEXT,
+      quote_sender_name TEXT,
+      quote_content TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+
+    CREATE TABLE IF NOT EXISTS reactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_jid TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      emoji TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -104,6 +116,15 @@ function createSchema(database: Database.Database): void {
       .run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
+  }
+
+  // Add quote columns if they don't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN quoted_message_id TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN quote_sender_name TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN quote_content TEXT`);
+  } catch {
+    /* columns already exist */
   }
 
   // Add is_main column if it doesn't exist (migration for existing DBs)
@@ -262,7 +283,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, quoted_message_id, quote_sender_name, quote_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -272,6 +293,9 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.quoted_message_id || null,
+    msg.quote_sender_name || null,
+    msg.quote_content || null,
   );
 }
 
@@ -313,7 +337,7 @@ export function getNewMessages(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -341,7 +365,7 @@ export function getMessagesSince(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -484,6 +508,32 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+// --- Reaction accessors ---
+
+export function storeReaction(reaction: Reaction): void {
+  db.prepare(
+    `INSERT INTO reactions (chat_jid, message_id, emoji, timestamp) VALUES (?, ?, ?, ?)`,
+  ).run(reaction.chatJid, reaction.messageId, reaction.emoji, reaction.timestamp);
+}
+
+/**
+ * Get the most recent message for a chat (any sender, including bot messages).
+ * Used by channels to find the message to react to.
+ */
+export function getLatestMessage(
+  chatJid: string,
+): { id: string; sender: string; sender_name: string; is_from_me: boolean } | undefined {
+  const row = db
+    .prepare(
+      `SELECT id, sender, sender_name, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+    )
+    .get(chatJid) as
+    | { id: string; sender: string; sender_name: string; is_from_me: number }
+    | undefined;
+  if (!row) return undefined;
+  return { ...row, is_from_me: row.is_from_me === 1 };
 }
 
 // --- Router state accessors ---

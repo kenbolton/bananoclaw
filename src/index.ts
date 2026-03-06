@@ -45,6 +45,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { StatusTracker } from './status-tracker.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -66,6 +67,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const activeTrackers = new Map<string, StatusTracker>();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -202,7 +204,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Create status tracker if the channel supports reactions
+  const tracker = channel.reactToLatestMessage
+    ? new StatusTracker((emoji) => channel.reactToLatestMessage!(chatJid, emoji))
+    : null;
+  if (tracker) activeTrackers.set(chatJid, tracker);
+
   await channel.setTyping?.(chatJid, true);
+  await tracker?.advance('thinking');
+
   let hadError = false;
   let outputSentToUser = false;
 
@@ -217,6 +227,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
+        await tracker?.advance('working');
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
@@ -237,6 +248,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
+    await tracker?.advance('failed');
+    tracker?.destroy();
+    activeTrackers.delete(chatJid);
+
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -255,6 +270,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     );
     return false;
   }
+
+  await tracker?.advance('done');
+  tracker?.destroy();
+  activeTrackers.delete(chatJid);
 
   return true;
 }
@@ -583,6 +602,15 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendReaction: async (jid, messageId, emoji) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) return;
+      if (messageId && channel.sendReaction) {
+        await channel.sendReaction(jid, messageId, emoji);
+      } else if (channel.reactToLatestMessage) {
+        await channel.reactToLatestMessage(jid, emoji);
+      }
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

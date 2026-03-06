@@ -32,10 +32,23 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      quoted_message_id TEXT,
+      quote_sender_name TEXT,
+      quote_content TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+
+    CREATE TABLE IF NOT EXISTS reactions (
+      message_id TEXT NOT NULL,
+      message_chat_jid TEXT NOT NULL,
+      reactor_jid TEXT NOT NULL,
+      reactor_name TEXT,
+      emoji TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      PRIMARY KEY (message_id, message_chat_jid, reactor_jid)
+    );
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -104,6 +117,28 @@ function createSchema(database: Database.Database): void {
       .run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
+  }
+
+  // Add is_main column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
+    );
+    // Backfill: existing rows with folder = 'main' are the main group
+    database.exec(
+      `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add quote columns if they don't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN quoted_message_id TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN quote_sender_name TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN quote_content TEXT`);
+  } catch {
+    /* columns already exist */
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -249,7 +284,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, quoted_message_id, quote_sender_name, quote_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -259,6 +294,9 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.quoted_message_id ?? null,
+    msg.quote_sender_name ?? null,
+    msg.quote_content ?? null,
   );
 }
 
@@ -274,9 +312,12 @@ export function storeMessageDirect(msg: {
   timestamp: string;
   is_from_me: boolean;
   is_bot_message?: boolean;
+  quoted_message_id?: string;
+  quote_sender_name?: string;
+  quote_content?: string;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, quoted_message_id, quote_sender_name, quote_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -286,6 +327,9 @@ export function storeMessageDirect(msg: {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.quoted_message_id ?? null,
+    msg.quote_sender_name ?? null,
+    msg.quote_content ?? null,
   );
 }
 
@@ -300,7 +344,7 @@ export function getNewMessages(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -328,7 +372,7 @@ export function getMessagesSince(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -471,6 +515,70 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+// --- Reaction accessors ---
+
+export interface Reaction {
+  message_id: string;
+  message_chat_jid: string;
+  reactor_jid: string;
+  reactor_name?: string;
+  emoji: string;
+  timestamp: string;
+}
+
+export function storeReaction(reaction: Reaction): void {
+  if (!reaction.emoji) {
+    db.prepare(
+      'DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?',
+    ).run(reaction.message_id, reaction.message_chat_jid, reaction.reactor_jid);
+  } else {
+    db.prepare(
+      `INSERT INTO reactions (message_id, message_chat_jid, reactor_jid, reactor_name, emoji, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(message_id, message_chat_jid, reactor_jid) DO UPDATE SET
+         emoji = excluded.emoji,
+         timestamp = excluded.timestamp,
+         reactor_name = COALESCE(excluded.reactor_name, reactor_name)`,
+    ).run(
+      reaction.message_id,
+      reaction.message_chat_jid,
+      reaction.reactor_jid,
+      reaction.reactor_name ?? null,
+      reaction.emoji,
+      reaction.timestamp,
+    );
+  }
+}
+
+export function getLatestMessage(
+  chatJid: string,
+): { id: string; is_from_me: number } | undefined {
+  return db
+    .prepare(
+      'SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1',
+    )
+    .get(chatJid) as { id: string; is_from_me: number } | undefined;
+}
+
+export function getMessageFromMe(messageId: string, chatJid: string): boolean {
+  const row = db
+    .prepare(
+      'SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ?',
+    )
+    .get(messageId, chatJid) as { is_from_me: number } | undefined;
+  return row ? row.is_from_me === 1 : false;
+}
+
+export function getMessageSender(
+  messageId: string,
+  chatJid: string,
+): string | undefined {
+  const row = db
+    .prepare('SELECT sender FROM messages WHERE id = ? AND chat_jid = ?')
+    .get(messageId, chatJid) as { sender: string } | undefined;
+  return row?.sender;
 }
 
 // --- Router state accessors ---

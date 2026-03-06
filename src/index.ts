@@ -24,6 +24,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getMessageFromMe,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -39,6 +40,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { StatusTracker } from './status-tracker.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -54,6 +56,8 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+// Per-group status trackers for emoji reaction progress indicators
+const activeTrackers = new Map<string, StatusTracker>();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -187,13 +191,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  const tracker = activeTrackers.get(chatJid) ?? null;
+  await tracker?.advance('thinking');
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let firstResult = true;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
+      if (firstResult) {
+        firstResult = false;
+        tracker?.advance('working').catch(() => {});
+      }
       const raw =
         typeof result.result === 'string'
           ? result.result
@@ -222,6 +234,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
+    activeTrackers.delete(chatJid);
+    tracker?.advance('failed').catch(() => {});
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -241,6 +255,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  activeTrackers.delete(chatJid);
+  tracker?.advance('done').catch(() => {});
   return true;
 }
 
@@ -395,6 +411,13 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
 
+          // React with 👀 immediately to acknowledge receipt
+          channel
+            .reactToLatestMessage?.(chatJid, '👀')
+            .catch((err) =>
+              logger.debug({ chatJid, err }, 'Failed to send 👀 reaction'),
+            );
+
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
@@ -410,7 +433,14 @@ async function startMessageLoop(): Promise<void> {
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container — enqueue for a new one
+            // No active container — create a status tracker and enqueue
+            if (channel.reactToLatestMessage) {
+              const tracker = new StatusTracker((emoji) =>
+                channel.reactToLatestMessage!(chatJid, emoji),
+              );
+              activeTrackers.get(chatJid)?.destroy();
+              activeTrackers.set(chatJid, tracker);
+            }
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -501,6 +531,23 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendReaction: async (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendReaction && !channel?.reactToLatestMessage) {
+        throw new Error('Channel does not support reactions');
+      }
+      if (messageId && channel.sendReaction) {
+        const fromMe = getMessageFromMe(messageId, jid);
+        const ts = parseInt(messageId.replace('signal-', ''), 10) || Date.now();
+        await channel.sendReaction(
+          jid,
+          { id: messageId, timestamp: ts, fromMe },
+          emoji,
+        );
+      } else {
+        await channel.reactToLatestMessage!(jid, emoji);
+      }
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

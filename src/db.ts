@@ -168,7 +168,7 @@ function createSchema(database: Database.Database): void {
         `SELECT sql FROM sqlite_master WHERE type='table' AND name='reactions'`,
       )
       .get() as { sql: string } | undefined;
-    if (info && !info.sql.includes('chat_jid')) {
+    if (info && info.sql.includes('reactor_jid')) {
       database.exec('DROP TABLE reactions');
       database.exec(`
         CREATE TABLE reactions (

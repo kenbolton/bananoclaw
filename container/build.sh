@@ -13,7 +13,7 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-container}"
 echo "Building NanoClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
 
-${CONTAINER_RUNTIME} build -t "${IMAGE_NAME}:${TAG}" .
+${CONTAINER_RUNTIME} build --build-arg CACHEBUST=$(date +%s) -t "${IMAGE_NAME}:${TAG}" .
 
 echo ""
 echo "Build complete!"

@@ -1,4 +1,9 @@
-export type AgentStatus = 'received' | 'thinking' | 'working' | 'done' | 'failed';
+export type AgentStatus =
+  | 'received'
+  | 'thinking'
+  | 'working'
+  | 'done'
+  | 'failed';
 
 const EMOJI: Record<AgentStatus, string> = {
   received: '👀',
@@ -8,7 +13,13 @@ const EMOJI: Record<AgentStatus, string> = {
   failed: '❌',
 };
 
-const ORDER: AgentStatus[] = ['received', 'thinking', 'working', 'done', 'failed'];
+const ORDER: AgentStatus[] = [
+  'received',
+  'thinking',
+  'working',
+  'done',
+  'failed',
+];
 
 /**
  * Forward-only emoji status state machine.

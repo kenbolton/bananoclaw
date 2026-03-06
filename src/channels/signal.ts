@@ -1,8 +1,7 @@
 import net from 'net';
-import path from 'path';
 
 import { ASSISTANT_NAME } from '../config.js';
-import { getLatestMessage, storeReaction } from '../db.js';
+import { getLatestMessage, getMessageById, storeReaction } from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -189,48 +188,76 @@ export class SignalChannel implements Channel {
     logger.info('Signal channel disconnected');
   }
 
-  async sendReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+  async sendReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
     // messageId format: "signal-{timestamp}"
     const ts = messageId.startsWith('signal-')
       ? parseInt(messageId.slice('signal-'.length), 10)
       : parseInt(messageId, 10);
     if (!ts || isNaN(ts)) {
-      logger.warn({ jid, messageId }, 'Cannot send Signal reaction: invalid message ID');
+      logger.warn(
+        { jid, messageId },
+        'Cannot send Signal reaction: invalid message ID',
+      );
       return;
     }
 
+    const msg = getMessageById(messageId);
+    const targetAuthor = msg
+      ? msg.is_from_me
+        ? this.opts.accountNumber
+        : msg.sender
+      : this.opts.accountNumber;
+
+    await this.cliSendReaction(jid, emoji, targetAuthor, ts, messageId);
+  }
+
+  private async cliSendReaction(
+    jid: string,
+    emoji: string,
+    targetAuthor: string,
+    targetTimestamp: number,
+    messageId: string,
+  ): Promise<void> {
+    const params: Record<string, unknown> = {
+      account: this.opts.accountNumber,
+      emoji,
+      targetAuthor,
+      targetTimestamp,
+    };
+
+    if (jid.startsWith('signal:group:')) {
+      params.groupId = jid.slice('signal:group:'.length);
+    } else {
+      params.recipient = [jid.slice('signal:'.length)];
+    }
+
     try {
-      if (jid.startsWith('signal:group:')) {
-        const groupId = jid.slice('signal:group:'.length);
-        await this.rpcCall('sendMessageReaction', {
-          account: this.opts.accountNumber,
-          groupId,
-          emoji,
-          targetAuthor: this.opts.accountNumber,
-          targetSentTimestamp: ts,
-          remove: false,
-        });
-      } else {
-        const recipient = jid.slice('signal:'.length);
-        await this.rpcCall('sendMessageReaction', {
-          account: this.opts.accountNumber,
-          recipient: [recipient],
-          emoji,
-          targetAuthor: this.opts.accountNumber,
-          targetSentTimestamp: ts,
-          remove: false,
-        });
-      }
-      storeReaction({ chatJid: jid, messageId, emoji, timestamp: new Date().toISOString() });
+      await this.rpcCall('sendReaction', params);
+      storeReaction({
+        chatJid: jid,
+        messageId,
+        emoji,
+        timestamp: new Date().toISOString(),
+      });
       logger.debug({ jid, messageId, emoji }, 'Signal reaction sent');
     } catch (err) {
-      logger.debug({ jid, messageId, emoji, err }, 'Failed to send Signal reaction');
+      logger.warn(
+        { jid, messageId, emoji, err },
+        'Failed to send Signal reaction',
+      );
     }
   }
 
   async reactToLatestMessage(jid: string, emoji: string): Promise<void> {
     const latest = getLatestMessage(jid);
-    if (!latest) return;
+    if (!latest) {
+      logger.warn({ jid }, 'No latest message in DB for reaction');
+      return;
+    }
 
     // Determine the author of the message being reacted to
     const targetAuthor = latest.is_from_me
@@ -240,35 +267,15 @@ export class SignalChannel implements Channel {
     const ts = latest.id.startsWith('signal-')
       ? parseInt(latest.id.slice('signal-'.length), 10)
       : parseInt(latest.id, 10);
-    if (!ts || isNaN(ts)) return;
-
-    try {
-      if (jid.startsWith('signal:group:')) {
-        const groupId = jid.slice('signal:group:'.length);
-        await this.rpcCall('sendMessageReaction', {
-          account: this.opts.accountNumber,
-          groupId,
-          emoji,
-          targetAuthor,
-          targetSentTimestamp: ts,
-          remove: false,
-        });
-      } else {
-        const recipient = jid.slice('signal:'.length);
-        await this.rpcCall('sendMessageReaction', {
-          account: this.opts.accountNumber,
-          recipient: [recipient],
-          emoji,
-          targetAuthor,
-          targetSentTimestamp: ts,
-          remove: false,
-        });
-      }
-      storeReaction({ chatJid: jid, messageId: latest.id, emoji, timestamp: new Date().toISOString() });
-      logger.debug({ jid, messageId: latest.id, emoji }, 'Signal reaction sent to latest message');
-    } catch (err) {
-      logger.debug({ jid, emoji, err }, 'Failed to send Signal reaction to latest message');
+    if (!ts || isNaN(ts)) {
+      logger.warn(
+        { jid, id: latest.id },
+        'Cannot parse timestamp from message ID',
+      );
+      return;
     }
+
+    await this.cliSendReaction(jid, emoji, targetAuthor, ts, latest.id);
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
@@ -397,7 +404,8 @@ export class SignalChannel implements Channel {
 
     // Extract reply-threading quote fields if present
     const quote = dataMessage.quote;
-    const quotedMessageId = quote?.id != null ? `signal-${quote.id}` : undefined;
+    const quotedMessageId =
+      quote?.id != null ? `signal-${quote.id}` : undefined;
     const quoteSenderName = quote?.authorName || quote?.author || undefined;
     const quoteContent = quote?.text || undefined;
 

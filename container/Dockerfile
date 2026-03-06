@@ -47,7 +47,8 @@ COPY agent-runner/package*.json ./
 # Install dependencies
 RUN npm install
 
-# Copy source code
+# Copy source code (CACHEBUST invalidates this layer on every build)
+ARG CACHEBUST=1
 COPY agent-runner/ ./
 
 # Build TypeScript

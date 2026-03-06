@@ -206,7 +206,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Create status tracker if the channel supports reactions
   const tracker = channel.reactToLatestMessage
-    ? new StatusTracker((emoji) => channel.reactToLatestMessage!(chatJid, emoji))
+    ? new StatusTracker((emoji) =>
+        channel.reactToLatestMessage!(chatJid, emoji),
+      )
     : null;
   if (tracker) activeTrackers.set(chatJid, tracker);
 

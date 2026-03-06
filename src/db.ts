@@ -160,6 +160,29 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Recreate reactions table with new schema (old table was for incoming WhatsApp reactions)
+  try {
+    const info = database
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='reactions'`,
+      )
+      .get() as { sql: string } | undefined;
+    if (info && !info.sql.includes('chat_jid')) {
+      database.exec('DROP TABLE reactions');
+      database.exec(`
+        CREATE TABLE reactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chat_jid TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          emoji TEXT NOT NULL,
+          timestamp TEXT NOT NULL
+        )
+      `);
+    }
+  } catch {
+    /* table doesn't exist yet, will be created by CREATE TABLE IF NOT EXISTS */
+  }
 }
 
 export function initDatabase(): void {
@@ -515,7 +538,12 @@ export function logTaskRun(log: TaskRunLog): void {
 export function storeReaction(reaction: Reaction): void {
   db.prepare(
     `INSERT INTO reactions (chat_jid, message_id, emoji, timestamp) VALUES (?, ?, ?, ?)`,
-  ).run(reaction.chatJid, reaction.messageId, reaction.emoji, reaction.timestamp);
+  ).run(
+    reaction.chatJid,
+    reaction.messageId,
+    reaction.emoji,
+    reaction.timestamp,
+  );
 }
 
 /**
@@ -524,7 +552,9 @@ export function storeReaction(reaction: Reaction): void {
  */
 export function getLatestMessage(
   chatJid: string,
-): { id: string; sender: string; sender_name: string; is_from_me: boolean } | undefined {
+):
+  | { id: string; sender: string; sender_name: string; is_from_me: boolean }
+  | undefined {
   const row = db
     .prepare(
       `SELECT id, sender, sender_name, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
@@ -532,6 +562,16 @@ export function getLatestMessage(
     .get(chatJid) as
     | { id: string; sender: string; sender_name: string; is_from_me: number }
     | undefined;
+  if (!row) return undefined;
+  return { ...row, is_from_me: row.is_from_me === 1 };
+}
+
+export function getMessageById(
+  messageId: string,
+): { sender: string; is_from_me: boolean } | undefined {
+  const row = db
+    .prepare('SELECT sender, is_from_me FROM messages WHERE id = ?')
+    .get(messageId) as { sender: string; is_from_me: number } | undefined;
   if (!row) return undefined;
   return { ...row, is_from_me: row.is_from_me === 1 };
 }

@@ -12,7 +12,11 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
-  sendReaction?: (jid: string, messageId: string | null, emoji: string) => Promise<void>;
+  sendReaction?: (
+    jid: string,
+    messageId: string | null,
+    emoji: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -92,7 +96,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
-              } else if (data.type === 'reaction' && data.chatJid && data.emoji) {
+              } else if (
+                data.type === 'reaction' &&
+                data.chatJid &&
+                data.emoji
+              ) {
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||

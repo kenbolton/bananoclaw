@@ -54,6 +54,10 @@ export interface NewMessage {
   quoted_message_id?: string;
   quote_sender_name?: string;
   quote_content?: string;
+  is_reaction?: boolean;
+  reaction_emoji?: string;
+  reaction_target_timestamp?: string;
+  reaction_target_author?: string;
 }
 
 export interface Reaction {
@@ -108,6 +112,12 @@ export interface Channel {
   ): Promise<void>;
   // Optional: react to the most recent message in the chat.
   reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
+  // Optional: edit a previously sent message.
+  editMessage?(
+    jid: string,
+    newText: string,
+    originalTimestamp?: number,
+  ): Promise<number>;
 }
 
 // Callback type that channels use to deliver inbound messages

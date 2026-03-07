@@ -1,7 +1,12 @@
 import net from 'net';
 
 import { ASSISTANT_NAME } from '../config.js';
-import { getLatestMessage, getMessageById, storeReaction } from '../db.js';
+import {
+  deleteReactionByTarget,
+  getLatestMessage,
+  getMessageById,
+  storeReaction,
+} from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -43,6 +48,12 @@ interface SignalDataMessage {
   message?: string;
   groupInfo?: { groupId: string; type?: string };
   quote?: SignalQuote;
+  reaction?: {
+    emoji: string;
+    targetAuthor: string;
+    targetSentTimestamp: number;
+    isRemove: boolean;
+  };
 }
 
 interface SignalEnvelope {
@@ -69,6 +80,7 @@ export class SignalChannel implements Channel {
 
   private socket: net.Socket | null = null;
   private connected = false;
+  private lastSentTimestamps: Map<string, number> = new Map();
   private opts: SignalChannelOpts;
   private socketPath: string;
   private rpcId = 0;
@@ -150,22 +162,53 @@ export class SignalChannel implements Channel {
   async sendMessage(jid: string, text: string): Promise<void> {
     const prefixed = `${ASSISTANT_NAME}: ${text}`;
 
+    let result: { timestamp?: number } | null = null;
     if (jid.startsWith('signal:group:')) {
       const groupId = jid.slice('signal:group:'.length);
-      await this.rpcCall('send', {
+      result = (await this.rpcCall('send', {
         account: this.opts.accountNumber,
         groupId,
         message: prefixed,
-      });
+      })) as { timestamp?: number } | null;
     } else {
       const recipient = jid.slice('signal:'.length);
-      await this.rpcCall('send', {
+      result = (await this.rpcCall('send', {
         account: this.opts.accountNumber,
         recipient: [recipient],
         message: prefixed,
-      });
+      })) as { timestamp?: number } | null;
+    }
+    if (result?.timestamp) {
+      this.lastSentTimestamps.set(jid, result.timestamp);
     }
     logger.info({ jid, length: prefixed.length }, 'Signal message sent');
+  }
+
+  async editMessage(
+    jid: string,
+    newText: string,
+    originalTimestamp?: number,
+  ): Promise<number> {
+    const editTimestamp = originalTimestamp ?? this.lastSentTimestamps.get(jid);
+    if (!editTimestamp) {
+      throw new Error('No message to edit — no stored timestamp for this chat');
+    }
+
+    const params: Record<string, unknown> = {
+      account: this.opts.accountNumber,
+      message: `${ASSISTANT_NAME}: ${newText}`,
+      editTimestamp,
+    };
+
+    if (jid.startsWith('signal:group:')) {
+      params.groupId = jid.slice('signal:group:'.length);
+    } else {
+      params.recipient = [jid.slice('signal:'.length)];
+    }
+
+    await this.rpcCall('send', params);
+    logger.info({ jid, editTimestamp }, 'Signal message edited');
+    return editTimestamp;
   }
 
   isConnected(): boolean {
@@ -386,6 +429,38 @@ export class SignalChannel implements Channel {
       source = envelope.sourceNumber || envelope.source || '';
       senderName = envelope.sourceName || source;
     } else {
+      return;
+    }
+
+    // Handle incoming reactions before regular message processing
+    const reaction = dataMessage?.reaction;
+    if (reaction) {
+      const groupId = dataMessage.groupInfo?.groupId;
+      const chatJid = groupId ? `signal:group:${groupId}` : `signal:${source}`;
+      const timestamp = envelope.timestamp
+        ? new Date(envelope.timestamp).toISOString()
+        : new Date().toISOString();
+      const groups = this.opts.registeredGroups();
+      if (groups[chatJid]) {
+        if (reaction.isRemove) {
+          deleteReactionByTarget(chatJid, reaction.targetSentTimestamp, source);
+        } else {
+          this.opts.onMessage(chatJid, {
+            id: `reaction-${source}-${envelope.timestamp ?? Date.now()}`,
+            chat_jid: chatJid,
+            sender: source,
+            sender_name: senderName,
+            content: `[reacted ${reaction.emoji} to a message]`,
+            timestamp,
+            is_from_me: source === this.opts.accountNumber,
+            is_bot_message: false,
+            is_reaction: true,
+            reaction_emoji: reaction.emoji,
+            reaction_target_timestamp: String(reaction.targetSentTimestamp),
+            reaction_target_author: reaction.targetAuthor,
+          });
+        }
+      }
       return;
     }
 

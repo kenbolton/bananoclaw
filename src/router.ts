@@ -16,6 +16,9 @@ export function formatMessages(
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
+    if (m.is_reaction && m.reaction_emoji) {
+      return `<reaction sender="${escapeXml(m.sender_name)}" emoji="${escapeXml(m.reaction_emoji)}" time="${escapeXml(displayTime)}"/>`;
+    }
     let body = escapeXml(m.content);
     if (m.quote_content) {
       const sender = escapeXml(m.quote_sender_name || 'Unknown');

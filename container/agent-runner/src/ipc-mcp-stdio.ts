@@ -334,6 +334,26 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 );
 
 server.tool(
+  'edit_message',
+  'Edit a previously sent message in the current chat.',
+  {
+    new_text: z.string().describe('The new message text'),
+    original_timestamp: z.string().optional().describe('Timestamp of the message to edit. Omit to edit the most recent bot message.'),
+  },
+  async (args) => {
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'edit_message',
+      chatJid,
+      newText: args.new_text,
+      originalTimestamp: args.original_timestamp || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Message edit sent.' }] };
+  },
+);
+
+server.tool(
   'react_to_message',
   'Send an emoji reaction to a message in the current chat. Use this to acknowledge, express emotion, or signal status without sending a text reply.',
   {

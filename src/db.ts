@@ -140,6 +140,22 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add reaction columns to messages if they don't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN is_reaction INTEGER DEFAULT 0`,
+    );
+    database.exec(`ALTER TABLE messages ADD COLUMN reaction_emoji TEXT`);
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN reaction_target_timestamp TEXT`,
+    );
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN reaction_target_author TEXT`,
+    );
+  } catch {
+    /* columns already exist */
+  }
+
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
@@ -306,7 +322,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, quoted_message_id, quote_sender_name, quote_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, quoted_message_id, quote_sender_name, quote_content, is_reaction, reaction_emoji, reaction_target_timestamp, reaction_target_author) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -319,7 +335,21 @@ export function storeMessage(msg: NewMessage): void {
     msg.quoted_message_id || null,
     msg.quote_sender_name || null,
     msg.quote_content || null,
+    msg.is_reaction ? 1 : 0,
+    msg.reaction_emoji || null,
+    msg.reaction_target_timestamp ?? null,
+    msg.reaction_target_author || null,
   );
+}
+
+export function deleteReactionByTarget(
+  chatJid: string,
+  targetTimestamp: number | string,
+  senderJid: string,
+): void {
+  db.prepare(
+    `DELETE FROM messages WHERE chat_jid = ? AND sender = ? AND reaction_target_timestamp = ? AND is_reaction = 1`,
+  ).run(chatJid, senderJid, String(targetTimestamp));
 }
 
 /**
@@ -363,7 +393,7 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content, is_reaction, reaction_emoji, reaction_target_timestamp, reaction_target_author
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -396,7 +426,7 @@ export function getMessagesSince(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content, is_reaction, reaction_emoji, reaction_target_timestamp, reaction_target_author
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?

@@ -616,6 +616,11 @@ async function main(): Promise<void> {
         await channel.reactToLatestMessage(jid, emoji);
       }
     },
+    editMessage: async (jid, newText, originalTimestamp) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.editMessage) return 0;
+      return channel.editMessage(jid, newText, originalTimestamp);
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {

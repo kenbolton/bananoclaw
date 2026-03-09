@@ -32,9 +32,12 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  statusHeartbeat?: () => void;
+  recoverPendingMessages?: () => void;
 }
 
 let ipcWatcherRunning = false;
+const RECOVERY_INTERVAL_MS = 60_000;
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -45,6 +48,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
+  let lastRecoveryTime = Date.now();
 
   const processIpcFiles = async () => {
     // Scan all group IPC directories (identity determined by directory)
@@ -112,15 +116,22 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   if (deps.sendReaction) {
-                    await deps.sendReaction(
-                      data.chatJid,
-                      (data.messageId as string | undefined) || null,
-                      data.emoji as string,
-                    );
-                    logger.info(
-                      { chatJid: data.chatJid, sourceGroup, emoji: data.emoji },
-                      'IPC reaction sent',
-                    );
+                    try {
+                      await deps.sendReaction(
+                        data.chatJid,
+                        (data.messageId as string | undefined) || null,
+                        data.emoji as string,
+                      );
+                      logger.info(
+                        { chatJid: data.chatJid, sourceGroup, emoji: data.emoji },
+                        'IPC reaction sent',
+                      );
+                    } catch (err) {
+                      logger.error(
+                        { chatJid: data.chatJid, emoji: data.emoji, sourceGroup, err },
+                        'IPC reaction failed',
+                      );
+                    }
                   }
                 } else {
                   logger.warn(
@@ -226,6 +237,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     }
 
+
+    // Status emoji heartbeat — detect dead containers with stale emoji state
+    deps.statusHeartbeat?.();
+
+    // Periodic message recovery — catch stuck messages after retry exhaustion or pipeline stalls
+    const now = Date.now();
+    if (now - lastRecoveryTime >= RECOVERY_INTERVAL_MS) {
+      lastRecoveryTime = now;
+      deps.recoverPendingMessages?.();
+    }
+
+
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
 
@@ -316,15 +339,15 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const date = new Date(data.schedule_value);
-          if (isNaN(date.getTime())) {
+          const scheduled = new Date(data.schedule_value);
+          if (isNaN(scheduled.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },
               'Invalid timestamp',
             );
             break;
           }
-          nextRun = date.toISOString();
+          nextRun = scheduled.toISOString();
         }
 
         const taskId =

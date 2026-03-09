@@ -58,8 +58,9 @@ RUN npm run build
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Copy entrypoint script
-# Starts as root to shadow .env via mount --bind, then drops to RUN_UID/RUN_GID (host user).
-# Secrets are passed via stdin JSON — never read from disk inside the container.
+# Starts as root to shadow .env via mount --bind (Apple Container VirtioFS limitation),
+# then drops to RUN_UID/RUN_GID (host user).
+# Credentials are injected by the host's credential proxy — never passed here.
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

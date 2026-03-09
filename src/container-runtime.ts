@@ -11,8 +11,32 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'container';
 
-/** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+/** Hostname or IP containers use to reach the host machine. */
+export const CONTAINER_HOST_GATEWAY = detectContainerHostGateway();
+
+function detectContainerHostGateway(): string {
+  if (os.platform() === 'darwin') {
+    // Apple Container doesn't support --add-host, so host.docker.internal can't be injected.
+    // Detect the actual gateway IP from the container network instead.
+    try {
+      const output = execSync('container network ls --format json', {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+      const networks: { id: string; status?: { ipv4Gateway?: string; ipv4Subnet?: string } }[] =
+        JSON.parse(output || '[]');
+      const defaultNet = networks.find((n) => n.id === 'default');
+      if (defaultNet?.status?.ipv4Gateway) {
+        return defaultNet.status.ipv4Gateway;
+      }
+    } catch {
+      // Fall through to default
+    }
+    return '192.168.64.1'; // fallback if container runtime not yet started
+  }
+  return 'host.docker.internal'; // Docker/Linux
+}
 
 /**
  * Address the credential proxy binds to.
@@ -24,7 +48,11 @@ export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
+  if (os.platform() === 'darwin') {
+    // Apple Container VMs reach the host via the bridge gateway.
+    // Bind to all interfaces so the proxy is reachable from the VM.
+    return '0.0.0.0';
+  }
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
@@ -42,10 +70,11 @@ function detectProxyBindHost(): string {
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
   if (os.platform() === 'linux') {
+    // On Linux, host.docker.internal isn't built-in — add it explicitly.
     return ['--add-host=host.docker.internal:host-gateway'];
   }
+  // macOS: CONTAINER_HOST_GATEWAY is the real gateway IP; no --add-host needed.
   return [];
 }
 

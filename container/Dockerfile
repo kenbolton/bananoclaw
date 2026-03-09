@@ -36,7 +36,7 @@ RUN npm install -g agent-browser @anthropic-ai/claude-code
 
 # Install gogcli (Google Workspace CLI: Gmail, Calendar, Drive, etc.)
 RUN ARCH=$(uname -m | sed 's/aarch64/arm64/' | sed 's/x86_64/amd64/') && \
-    curl -fsSL "https://github.com/steipete/gogcli/releases/latest/download/gogcli_0.11.0_linux_${ARCH}.tar.gz" | tar xz -C /usr/local/bin gog
+    curl -fsSL "https://github.com/steipete/gogcli/releases/latest/download/gogcli_0.12.0_linux_${ARCH}.tar.gz" | tar xz -C /usr/local/bin gog
 
 # Create app directory
 WORKDIR /app

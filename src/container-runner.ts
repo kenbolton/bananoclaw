@@ -29,6 +29,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { sanitizeSurrogates } from './router.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -307,6 +308,33 @@ function buildContainerArgs(
   return args;
 }
 
+function sanitizeSessionTranscripts(sessionDir: string): void {
+  if (!fs.existsSync(sessionDir)) return;
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!entry.name.endsWith('.jsonl')) continue;
+      const original = fs.readFileSync(full, 'utf-8');
+      const sanitized = original
+        .split('\n')
+        .map((line) => {
+          if (!line.trim()) return line;
+          try {
+            return JSON.stringify(JSON.parse(line), (_, v) =>
+              typeof v === 'string' ? sanitizeSurrogates(v) : v
+            );
+          } catch {
+            return line;
+          }
+        })
+        .join('\n');
+      if (sanitized !== original) fs.writeFileSync(full, sanitized, 'utf-8');
+    }
+  };
+  walk(sessionDir);
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -349,6 +377,9 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
+  const sessionDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
+  sanitizeSessionTranscripts(sessionDir);
+
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -361,7 +392,8 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
+    const safeInput = { ...input, prompt: sanitizeSurrogates(input.prompt) };
+    container.stdin.write(JSON.stringify(safeInput));
     container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive

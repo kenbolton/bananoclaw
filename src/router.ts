@@ -1,9 +1,16 @@
 import { Channel, NewMessage } from './types.js';
 import { formatLocalTime } from './timezone.js';
 
+export function sanitizeSurrogates(s: string): string {
+  return s.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '\uFFFD',
+  );
+}
+
 export function escapeXml(s: string): string {
   if (!s) return '';
-  return s
+  return sanitizeSurrogates(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

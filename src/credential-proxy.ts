@@ -23,6 +23,29 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
+/**
+ * Sanitize lone UTF-16 surrogates in a JSON request body.
+ * Returns the original buffer unchanged for non-JSON payloads.
+ */
+function sanitizeRequestBody(body: Buffer): Buffer {
+  try {
+    const text = body.toString('utf-8');
+    const obj = JSON.parse(text);
+    const sanitized = JSON.stringify(obj, (_key, value) => {
+      if (typeof value === 'string') {
+        return value.replace(
+          /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+          '\uFFFD',
+        );
+      }
+      return value;
+    });
+    return Buffer.from(sanitized, 'utf-8');
+  } catch {
+    return body; // not JSON — pass through unchanged
+  }
+}
+
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
@@ -49,7 +72,8 @@ export function startCredentialProxy(
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
-        const body = Buffer.concat(chunks);
+        const rawBody = Buffer.concat(chunks);
+        const body = sanitizeRequestBody(rawBody);
         const headers: Record<string, string | number | string[] | undefined> =
           {
             ...(req.headers as Record<string, string>),

@@ -249,6 +249,7 @@ export async function processTaskIpc(
     name?: string;
     folder?: string;
     trigger?: string;
+    agentName?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
   },
@@ -518,6 +519,7 @@ export async function processTaskIpc(
           folder: data.folder,
           trigger: data.trigger,
           added_at: new Date().toISOString(),
+          agentName: data.agentName,
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
         });

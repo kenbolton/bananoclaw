@@ -140,6 +140,15 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add agent_name column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN agent_name TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add reaction columns to messages if they don't exist (migration for existing DBs)
   try {
     database.exec(
@@ -671,6 +680,7 @@ export function getRegisteredGroup(
         folder: string;
         trigger_pattern: string;
         added_at: string;
+        agent_name: string | null;
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
@@ -690,6 +700,7 @@ export function getRegisteredGroup(
     folder: row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
+    agentName: row.agent_name ?? undefined,
     containerConfig: row.container_config
       ? JSON.parse(row.container_config)
       : undefined,
@@ -704,14 +715,15 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, agent_name, container_config, requires_trigger, is_main)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
     group.folder,
     group.trigger,
     group.added_at,
+    group.agentName ?? null,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
@@ -725,6 +737,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     folder: string;
     trigger_pattern: string;
     added_at: string;
+    agent_name: string | null;
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
@@ -743,6 +756,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       folder: row.folder,
       trigger: row.trigger_pattern,
       added_at: row.added_at,
+      agentName: row.agent_name ?? undefined,
       containerConfig: row.container_config
         ? JSON.parse(row.container_config)
         : undefined,

@@ -159,8 +159,8 @@ export class SignalChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
-    const prefixed = `${ASSISTANT_NAME}: ${text}`;
+  async sendMessage(jid: string, text: string, senderName?: string): Promise<void> {
+    const prefixed = `${senderName ?? ASSISTANT_NAME}: ${text}`;
 
     let result: { timestamp?: number } | null = null;
     if (jid.startsWith('signal:group:')) {
@@ -188,6 +188,7 @@ export class SignalChannel implements Channel {
     jid: string,
     newText: string,
     originalTimestamp?: number,
+    senderName?: string,
   ): Promise<number> {
     const editTimestamp = originalTimestamp ?? this.lastSentTimestamps.get(jid);
     if (!editTimestamp) {
@@ -196,7 +197,7 @@ export class SignalChannel implements Channel {
 
     const params: Record<string, unknown> = {
       account: this.opts.accountNumber,
-      message: `${ASSISTANT_NAME}: ${newText}`,
+      message: `${senderName ?? ASSISTANT_NAME}: ${newText}`,
       editTimestamp,
     };
 

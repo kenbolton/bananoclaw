@@ -4,14 +4,12 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
-  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -21,15 +19,11 @@ import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
-  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
-  hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { sanitizeSurrogates } from './router.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -44,6 +38,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  secrets?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -65,7 +60,6 @@ function buildVolumeMounts(
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
-  const homeDir = os.homedir();
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
@@ -80,9 +74,10 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Note: Apple Container only supports directory mounts, not file mounts,
-    // so we cannot shadow .env with /dev/null as Docker would allow.
-    // Secrets are protected by the credential proxy; .env is visible read-only.
+    // Note: .env is visible read-only via the project-root mount below.
+    // We cannot shadow it with /dev/null (Apple Container only supports directory
+    // mounts, not file/device mounts). API secrets are protected by passing them
+    // via stdin in readSecrets() — the agent never needs to read .env directly.
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -160,36 +155,6 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Gmail credentials directory (for Gmail MCP inside the container)
-  const gmailDir = path.join(homeDir, '.gmail-mcp');
-  if (fs.existsSync(gmailDir)) {
-    mounts.push({
-      hostPath: gmailDir,
-      containerPath: '/home/node/.gmail-mcp',
-      readonly: false, // MCP may need to refresh OAuth tokens
-    });
-  }
-
-  // gogcli config directory (Google Workspace: Gmail, Calendar, Drive, etc.)
-  // macOS stores config in ~/Library/Application Support/gogcli/
-  // Linux stores config in ~/.config/gogcli/
-  // Container expects Linux path regardless of host OS
-  const gogcliDirMac = path.join(
-    homeDir,
-    'Library',
-    'Application Support',
-    'gogcli',
-  );
-  const gogcliDirLinux = path.join(homeDir, '.config', 'gogcli');
-  const gogcliDir = fs.existsSync(gogcliDirMac) ? gogcliDirMac : gogcliDirLinux;
-  if (fs.existsSync(gogcliDir)) {
-    mounts.push({
-      hostPath: gogcliDir,
-      containerPath: '/home/node/.config/gogcli',
-      readonly: false, // gog may need to refresh OAuth tokens
-    });
-  }
-
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -217,7 +182,7 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (fs.existsSync(agentRunnerSrc)) {
+  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
@@ -239,6 +204,20 @@ function buildVolumeMounts(
   return mounts;
 }
 
+/**
+ * Read allowed secrets from .env for passing to the container via stdin.
+ * Secrets are never written to disk or mounted as files.
+ */
+function readSecrets(): Record<string, string> {
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_AUTH_TOKEN',
+    'OLLAMA_HOST',
+  ]);
+}
+
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -248,44 +227,14 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
-  } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
-  }
-
-  // Runtime-specific args for host gateway resolution
-  args.push(...hostGatewayArgs());
-
-  // Pass gogcli env vars for Google Workspace access
-  const gogEnvVars = readEnvFile([
-    'GOG_KEYRING_BACKEND',
-    'GOG_KEYRING_PASSWORD',
-    'GOG_ACCOUNT',
-  ]);
-  for (const [key, value] of Object.entries(gogEnvVars)) {
-    args.push('-e', `${key}=${value}`);
-  }
-
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0) {
-    args.push('-e', `RUN_UID=${hostUid}`);
-    args.push('-e', `RUN_GID=${hostGid}`);
+  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+    args.push('--user', `${hostUid}:${hostGid}`);
+    args.push('-e', 'HOME=/home/node');
   }
 
   for (const mount of mounts) {
@@ -299,33 +248,6 @@ function buildContainerArgs(
   args.push(CONTAINER_IMAGE);
 
   return args;
-}
-
-function sanitizeSessionTranscripts(sessionDir: string): void {
-  if (!fs.existsSync(sessionDir)) return;
-  const walk = (dir: string) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) { walk(full); continue; }
-      if (!entry.name.endsWith('.jsonl')) continue;
-      const original = fs.readFileSync(full, 'utf-8');
-      const sanitized = original
-        .split('\n')
-        .map((line) => {
-          if (!line.trim()) return line;
-          try {
-            return JSON.stringify(JSON.parse(line), (_, v) =>
-              typeof v === 'string' ? sanitizeSurrogates(v) : v
-            );
-          } catch {
-            return line;
-          }
-        })
-        .join('\n');
-      if (sanitized !== original) fs.writeFileSync(full, sanitized, 'utf-8');
-    }
-  };
-  walk(sessionDir);
 }
 
 export async function runContainerAgent(
@@ -370,9 +292,6 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
-  const sessionDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
-  sanitizeSessionTranscripts(sessionDir);
-
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -385,9 +304,12 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    const safeInput = { ...input, prompt: sanitizeSurrogates(input.prompt) };
-    container.stdin.write(JSON.stringify(safeInput));
+    // Pass secrets via stdin (never written to disk or mounted as files)
+    input.secrets = readSecrets();
+    container.stdin.write(JSON.stringify(input));
     container.stdin.end();
+    // Remove secrets from input so they don't appear in logs
+    delete input.secrets;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
@@ -450,7 +372,13 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (!line) continue;
+        // Surface Ollama MCP activity at info level for visibility
+        if (line.includes('[OLLAMA]')) {
+          logger.info({ container: group.folder }, line);
+        } else {
+          logger.debug({ container: group.folder }, line);
+        }
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).

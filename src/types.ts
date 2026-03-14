@@ -37,6 +37,7 @@ export interface RegisteredGroup {
   folder: string;
   trigger: string;
   added_at: string;
+  agentName?: string; // Per-group display name (falls back to global ASSISTANT_NAME)
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
@@ -96,7 +97,7 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(jid: string, text: string, senderName?: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
@@ -117,6 +118,7 @@ export interface Channel {
     jid: string,
     newText: string,
     originalTimestamp?: number,
+    senderName?: string,
   ): Promise<number>;
 }
 

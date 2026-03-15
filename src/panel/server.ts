@@ -25,7 +25,18 @@ import { handleRoute } from './routes.js';
 import { panelEvents } from './events.js';
 import { logger } from '../logger.js';
 
+// Resolve public dir: prefer dist/panel/public (compiled), fall back to
+// src/panel/public (tsx dev mode). Both are relative to the working directory
+// set in the launchctl plist (/Users/ken/src/nanoclaw).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+function resolvePublicDir(): string {
+  const candidates = [
+    path.join(__dirname, 'public'),                        // dist/panel/public (compiled)
+    path.join(process.cwd(), 'src', 'panel', 'public'),   // src/panel/public (dev/tsx)
+    path.join(process.cwd(), 'dist', 'panel', 'public'),  // dist/panel/public (alt)
+  ];
+  return candidates.find(p => fs.existsSync(p)) ?? candidates[0];
+}
 
 export interface PanelConfig {
   port: number;
@@ -36,7 +47,8 @@ export interface PanelConfig {
 
 export function startPanel(config: PanelConfig): http.Server {
   const db = openDb(config.dbPath);
-  const publicDir = path.join(__dirname, 'public');
+  const publicDir = resolvePublicDir();
+  logger.info(`Panel static files: ${publicDir}`);
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost:${config.port}`);

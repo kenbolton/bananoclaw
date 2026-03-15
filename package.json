@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/panel/public dist/panel/public",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "signal:auth": "tsx src/signal-auth.ts",

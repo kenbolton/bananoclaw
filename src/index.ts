@@ -49,6 +49,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { panelEvents } from './panel/events.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { StatusTracker } from './status-tracker.js';
 import {
@@ -335,6 +336,9 @@ async function runAgent(
       }
     : undefined;
 
+  const agentStart = Date.now();
+  panelEvents.emit('agent:start', { groupFolder: group.folder, chatJid });
+
   try {
     const output = await runContainerAgent(
       group,
@@ -361,12 +365,33 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+      panelEvents.emit('agent:error', {
+        groupFolder: group.folder,
+        chatJid,
+        durationMs: Date.now() - agentStart,
+        error: output.error,
+      });
       return 'error';
     }
 
+    panelEvents.emit('agent:done', {
+      groupFolder: group.folder,
+      chatJid,
+      durationMs: Date.now() - agentStart,
+      tokenUsage: output.inputTokens != null ? {
+        inputTokens: output.inputTokens,
+        outputTokens: output.outputTokens,
+      } : undefined,
+    });
     return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
+    panelEvents.emit('agent:error', {
+      groupFolder: group.folder,
+      chatJid,
+      durationMs: Date.now() - agentStart,
+      error: String(err),
+    });
     return 'error';
   }
 }
@@ -501,6 +526,14 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
   restoreRemoteControl();
+
+  // Start panel dashboard if enabled
+  const panelPort = parseInt(process.env.PANEL_PORT ?? '0');
+  if (panelPort > 0) {
+    const { startPanel } = await import('./panel/server.js');
+    const { STORE_DIR } = await import('./config.js');
+    startPanel({ port: panelPort, dbPath: path.join(STORE_DIR, 'messages.db') });
+  }
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(

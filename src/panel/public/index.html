@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NanoClaw Panel</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242736;
+    --border: #2e3147;
+    --accent: #7c6af7;
+    --accent2: #4fc3f7;
+    --green: #4caf82;
+    --red: #f07070;
+    --yellow: #f0c060;
+    --text: #e2e4f0;
+    --muted: #7880a0;
+    --font: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+
+  /* Layout */
+  .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 20px 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .main { padding: 24px; overflow-y: auto; }
+
+  /* Sidebar */
+  .logo { padding: 0 20px 20px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .logo h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; }
+  .logo .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 20px; cursor: pointer; color: var(--muted); transition: all 0.15s; border-left: 3px solid transparent; font-size: 13px; }
+  .nav-item:hover { color: var(--text); background: var(--surface2); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(124,106,247,0.08); }
+  .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+  .nav-section { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); padding: 16px 20px 6px; }
+
+  /* Status dot */
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-left: auto; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Views */
+  .view { display: none; }
+  .view.active { display: block; }
+  .view-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.5px; }
+  .view-sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+
+  /* Cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 8px; }
+  .card-value { font-size: 28px; font-weight: 700; letter-spacing: -1px; line-height: 1; }
+  .card-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .card.green .card-value { color: var(--green); }
+  .card.red .card-value { color: var(--red); }
+  .card.purple .card-value { color: var(--accent); }
+  .card.blue .card-value { color: var(--accent2); }
+
+  /* Section */
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+  .section-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .section-title { font-size: 13px; font-weight: 600; }
+  .section-meta { font-size: 11px; color: var(--muted); }
+
+  /* Chart */
+  .chart-wrap { padding: 16px 18px; height: 180px; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* Badges */
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+  .badge.success { background: rgba(76,175,130,0.15); color: var(--green); }
+  .badge.error { background: rgba(240,112,112,0.15); color: var(--red); }
+  .badge.active { background: rgba(124,106,247,0.15); color: var(--accent); }
+  .badge.paused { background: rgba(120,128,160,0.15); color: var(--muted); }
+  .badge.cron { background: rgba(79,195,247,0.15); color: var(--accent2); }
+  .badge.interval { background: rgba(240,192,96,0.15); color: var(--yellow); }
+  .badge.once { background: rgba(240,112,112,0.12); color: var(--red); }
+  .badge.main { background: rgba(240,192,96,0.15); color: var(--yellow); }
+  .badge.bot { background: rgba(124,106,247,0.12); color: var(--accent); }
+  .badge.user { background: rgba(79,195,247,0.12); color: var(--accent2); }
+
+  /* Monospace content */
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .truncate { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .muted { color: var(--muted); }
+
+  /* Message content */
+  .msg-content { font-size: 13px; line-height: 1.4; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Event feed */
+  .event-feed { max-height: 320px; overflow-y: auto; }
+  .event-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .event-row:last-child { border-bottom: none; }
+  .event-type { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 4px; background: var(--surface2); color: var(--muted); white-space: nowrap; }
+  .event-type.start { color: var(--accent); }
+  .event-type.done { color: var(--green); }
+  .event-type.error { color: var(--red); }
+  .event-detail { flex: 1; color: var(--muted); }
+  .event-time { color: var(--muted); white-space: nowrap; font-family: var(--mono); font-size: 11px; }
+
+  /* Refresh indicator */
+  .refresh-bar { position: fixed; top: 0; left: 0; height: 2px; background: var(--accent); transition: width 0.3s; width: 0; }
+  .refresh-bar.loading { width: 60%; }
+  .refresh-bar.done { width: 100%; transition: width 0.1s; }
+
+  /* Empty state */
+  .empty { padding: 40px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* Duration bar */
+  .dur-bar { display: inline-block; height: 4px; background: var(--accent); border-radius: 2px; vertical-align: middle; margin-left: 8px; }
+
+  /* Last updated */
+  #last-updated { font-size: 11px; color: var(--muted); position: fixed; bottom: 12px; right: 16px; }
+
+  @media (max-width: 700px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="refresh-bar" id="refresh-bar"></div>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo">
+      <h1>🦀 NanoClaw</h1>
+      <div class="sub">Panel v0.1</div>
+    </div>
+    <nav>
+      <div class="nav-item active" data-view="dashboard" onclick="showView('dashboard', this)">
+        <span class="nav-icon">◈</span> Dashboard
+        <span class="status-dot" id="status-dot"></span>
+      </div>
+      <div class="nav-item" data-view="groups" onclick="showView('groups', this)">
+        <span class="nav-icon">⬡</span> Groups
+      </div>
+      <div class="nav-item" data-view="messages" onclick="showView('messages', this)">
+        <span class="nav-icon">◎</span> Messages
+      </div>
+      <div class="nav-item" data-view="tasks" onclick="showView('tasks', this)">
+        <span class="nav-icon">◷</span> Scheduled Tasks
+      </div>
+      <div class="nav-item" data-view="runs" onclick="showView('runs', this)">
+        <span class="nav-icon">▸</span> Task Runs
+      </div>
+      <div class="nav-item" data-view="events" onclick="showView('events', this)">
+        <span class="nav-icon">⚡</span> Live Events
+      </div>
+    </nav>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- Dashboard -->
+    <div class="view active" id="view-dashboard">
+      <div class="view-title">Dashboard</div>
+      <div class="view-sub" id="dash-subtitle">Loading…</div>
+
+      <div class="cards" id="summary-cards">
+        <div class="card purple"><div class="card-label">Total Messages</div><div class="card-value" id="c-total">—</div></div>
+        <div class="card blue"><div class="card-label">User Messages</div><div class="card-value" id="c-user">—</div></div>
+        <div class="card green"><div class="card-label">Bot Responses</div><div class="card-value" id="c-bot">—</div></div>
+        <div class="card"><div class="card-label">Active Groups</div><div class="card-value" id="c-groups">—</div></div>
+        <div class="card"><div class="card-label">Active Tasks</div><div class="card-value" id="c-tasks">—</div></div>
+        <div class="card"><div class="card-label">Runs Today</div><div class="card-value" id="c-runs">—</div><div class="card-sub" id="c-errors"></div></div>
+        <div class="card"><div class="card-label">Avg Task Duration</div><div class="card-value" id="c-avg">—</div><div class="card-sub">last 7 days</div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Message Activity — Last 24h</span>
+          <span class="section-meta" id="activity-range"></span>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="activity-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Recent Events</span>
+          <span class="section-meta">live · updates every 10s</span>
+        </div>
+        <div class="event-feed" id="dash-events">
+          <div class="empty">No events yet. Events appear when agents run.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Groups -->
+    <div class="view" id="view-groups">
+      <div class="view-title">Groups</div>
+      <div class="view-sub">Registered chats and their agents</div>
+      <div class="section">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>Agent</th><th>Channel</th>
+            <th>Messages</th><th>Last Active</th><th>Status</th>
+          </tr></thead>
+          <tbody id="groups-tbody"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div class="view" id="view-messages">
+      <div class="view-title">Messages</div>
+      <div class="view-sub">Recent messages across all groups</div>
+      <div class="section" style="margin-bottom:16px">
+        <div class="section-header" style="gap:12px">
+          <span class="section-title">Filter by group</span>
+          <select id="group-filter" onchange="loadMessages()" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:12px;outline:none;">
+            <option value="">All groups</option>
+          </select>
+        </div>
+      </div>
+      <div class="section">
+        <table>
+          <thead><tr>
+            <th>Time</th><th>Group</th><th>From</th><th>Type</th><th>Message</th>
+          </tr></thead>
+          <tbody id="messages-tbody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tasks -->
+    <div class="view" id="view-tasks">
+      <div class="view-title">Scheduled Tasks</div>
+      <div class="view-sub">Cron, interval, and one-time tasks</div>
+      <div class="section">
+        <table>
+          <thead><tr>
+            <th>Group</th><th>Schedule</th><th>Next Run</th><th>Last Run</th><th>Status</th><th>Prompt</th>
+          </tr></thead>
+          <tbody id="tasks-tbody"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Task Runs -->
+    <div class="view" id="view-runs">
+      <div class="view-title">Task Runs</div>
+      <div class="view-sub">Execution history with durations</div>
+      <div class="section">
+        <table>
+          <thead><tr>
+            <th>Time</th><th>Task ID</th><th>Duration</th><th>Status</th><th>Result / Error</th>
+          </tr></thead>
+          <tbody id="runs-tbody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Events -->
+    <div class="view" id="view-events">
+      <div class="view-title">Live Events</div>
+      <div class="view-sub">Agent lifecycle events · updates every 10s</div>
+      <div class="section">
+        <div class="event-feed" id="events-feed" style="max-height:600px">
+          <div class="empty">No events yet. Events appear when agents run.</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div id="last-updated"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let activityChart = null;
+let allGroups = [];
+const MAX_DURATION_FOR_BAR = 30000; // 30s = full bar
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function showView(name, el) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  el.classList.add('active');
+  refreshView(name);
+}
+
+function refreshView(name) {
+  if (name === 'dashboard') loadDashboard();
+  else if (name === 'groups') loadGroups();
+  else if (name === 'messages') loadMessages();
+  else if (name === 'tasks') loadTasks();
+  else if (name === 'runs') loadTaskRuns();
+  else if (name === 'events') loadEvents();
+}
+
+function currentView() {
+  const v = document.querySelector('.view.active');
+  return v ? v.id.replace('view-', '') : 'dashboard';
+}
+
+// ── Fetch helpers ───────────────────────────────────────────────────────────
+async function api(path) {
+  const r = await fetch('/api' + path);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function setRefresh(state) {
+  const bar = document.getElementById('refresh-bar');
+  bar.className = 'refresh-bar ' + state;
+  if (state === 'done') setTimeout(() => bar.style.width = '0', 400);
+}
+
+// ── Formatting ──────────────────────────────────────────────────────────────
+function relTime(iso) {
+  if (!iso) return '—';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  return Math.floor(diff / 86400000) + 'd ago';
+}
+
+function fmtDuration(ms) {
+  if (ms == null) return '—';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  return (ms / 60000).toFixed(1) + 'm';
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function badge(text, cls) {
+  return `<span class="badge ${cls}">${text}</span>`;
+}
+
+function durBar(ms) {
+  if (!ms) return '';
+  const pct = Math.min(100, (ms / MAX_DURATION_FOR_BAR) * 100);
+  return `<span class="dur-bar" style="width:${pct * 0.6}px" title="${ms}ms"></span>`;
+}
+
+function eventTypeBadge(type) {
+  const map = {
+    'agent:start': 'start',
+    'agent:done': 'done',
+    'agent:error': 'error',
+    'task:run': 'done',
+  };
+  return `<span class="event-type ${map[type] ?? ''}">${type}</span>`;
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  setRefresh('loading');
+  try {
+    const [summary, activity, events] = await Promise.all([
+      api('/summary'), api('/activity?hours=24'), api('/events?limit=30')
+    ]);
+
+    // Summary cards
+    document.getElementById('c-total').textContent = summary.totalMessages.toLocaleString();
+    document.getElementById('c-user').textContent = summary.totalUserMessages.toLocaleString();
+    document.getElementById('c-bot').textContent = summary.totalBotMessages.toLocaleString();
+    document.getElementById('c-groups').textContent = summary.activeGroups;
+    document.getElementById('c-tasks').textContent = summary.scheduledTasks;
+    document.getElementById('c-runs').textContent = summary.taskRunsToday;
+    const errEl = document.getElementById('c-errors');
+    if (summary.taskErrorsToday > 0) {
+      errEl.textContent = summary.taskErrorsToday + ' error' + (summary.taskErrorsToday > 1 ? 's' : '');
+      errEl.style.color = 'var(--red)';
+    } else {
+      errEl.textContent = 'no errors';
+      errEl.style.color = 'var(--green)';
+    }
+    document.getElementById('c-avg').textContent =
+      summary.avgTaskDurationMs ? fmtDuration(Math.round(summary.avgTaskDurationMs)) : '—';
+
+    document.getElementById('dash-subtitle').textContent =
+      `${summary.activeGroups} group${summary.activeGroups !== 1 ? 's' : ''} · ${summary.scheduledTasks} active task${summary.scheduledTasks !== 1 ? 's' : ''} · updated ${new Date().toLocaleTimeString()}`;
+
+    // Activity chart
+    renderActivityChart(activity);
+
+    // Events
+    renderEventFeed('dash-events', events);
+
+    document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    setRefresh('done');
+  } catch (e) {
+    setRefresh('done');
+    console.error(e);
+  }
+}
+
+function renderActivityChart(data) {
+  const ctx = document.getElementById('activity-chart').getContext('2d');
+
+  // Fill in missing hours
+  const now = new Date();
+  const hours = [];
+  for (let i = 23; i >= 0; i--) {
+    const d = new Date(now - i * 3600000);
+    hours.push(d.toISOString().slice(0, 13));
+  }
+  const byHour = Object.fromEntries(data.map(r => [r.hour, r]));
+  const labels = hours.map(h => {
+    const d = new Date(h + ':00:00Z');
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  });
+  const userMsgs = hours.map(h => byHour[h]?.userMessages ?? 0);
+  const botMsgs = hours.map(h => byHour[h]?.botMessages ?? 0);
+
+  if (activityChart) {
+    activityChart.data.labels = labels;
+    activityChart.data.datasets[0].data = userMsgs;
+    activityChart.data.datasets[1].data = botMsgs;
+    activityChart.update('none');
+    return;
+  }
+
+  activityChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'User', data: userMsgs, backgroundColor: 'rgba(79,195,247,0.5)', borderColor: 'rgba(79,195,247,0.8)', borderWidth: 1 },
+        { label: 'Bot', data: botMsgs, backgroundColor: 'rgba(124,106,247,0.5)', borderColor: 'rgba(124,106,247,0.8)', borderWidth: 1 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#7880a0', font: { size: 11 } } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#7880a0', font: { size: 10 }, maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { stacked: true, ticks: { color: '#7880a0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+      }
+    }
+  });
+}
+
+function renderEventFeed(elId, events) {
+  const el = document.getElementById(elId);
+  if (!events.length) {
+    el.innerHTML = '<div class="empty">No events yet. Events appear when agents run.</div>';
+    return;
+  }
+  el.innerHTML = [...events].reverse().map(e => `
+    <div class="event-row">
+      ${eventTypeBadge(e.type)}
+      <div class="event-detail">
+        <b>${e.groupFolder}</b>
+        ${e.durationMs ? ' · ' + fmtDuration(e.durationMs) : ''}
+        ${e.tokenUsage?.inputTokens ? ` · ${e.tokenUsage.inputTokens.toLocaleString()} in / ${(e.tokenUsage.outputTokens ?? 0).toLocaleString()} out tokens` : ''}
+        ${e.error ? `<span style="color:var(--red)"> · ${e.error}</span>` : ''}
+      </div>
+      <div class="event-time">${fmtTime(e.timestamp)}</div>
+    </div>
+  `).join('');
+}
+
+// ── Groups ──────────────────────────────────────────────────────────────────
+async function loadGroups() {
+  setRefresh('loading');
+  try {
+    allGroups = await api('/groups');
+    const tbody = document.getElementById('groups-tbody');
+    if (!allGroups.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No groups registered.</td></tr>';
+      return;
+    }
+
+    // Populate group filter on messages tab
+    const sel = document.getElementById('group-filter');
+    sel.innerHTML = '<option value="">All groups</option>' +
+      allGroups.map(g => `<option value="${g.jid}">${g.name}</option>`).join('');
+
+    tbody.innerHTML = allGroups.map(g => `
+      <tr>
+        <td><b>${g.name}</b><br><span class="muted mono" style="font-size:11px">${g.folder}</span></td>
+        <td>${g.agentName ? `<span style="color:var(--accent)">${g.agentName}</span>` : '<span class="muted">default</span>'}</td>
+        <td>${g.channel ? badge(g.channel, 'active') : '<span class="muted">—</span>'}</td>
+        <td>${g.messageCount.toLocaleString()}</td>
+        <td>${relTime(g.lastMessageTime)}</td>
+        <td>${g.isMain ? badge('main', 'main') : badge('standard', 'paused')}</td>
+      </tr>
+    `).join('');
+    setRefresh('done');
+  } catch(e) { setRefresh('done'); console.error(e); }
+}
+
+// ── Messages ────────────────────────────────────────────────────────────────
+async function loadMessages() {
+  const group = document.getElementById('group-filter').value;
+  const url = '/messages?limit=100' + (group ? '&group=' + encodeURIComponent(group) : '');
+  setRefresh('loading');
+  try {
+    const msgs = await api(url);
+    const tbody = document.getElementById('messages-tbody');
+    if (!msgs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No messages.</td></tr>';
+      setRefresh('done');
+      return;
+    }
+    tbody.innerHTML = msgs.map(m => `
+      <tr>
+        <td class="mono muted" style="font-size:11px;white-space:nowrap">${fmtTime(m.timestamp)}</td>
+        <td class="truncate muted" style="max-width:120px">${m.chatName ?? m.chatJid}</td>
+        <td class="truncate muted" style="max-width:100px">${m.senderName ?? m.sender}</td>
+        <td>${m.isBotMessage ? badge('bot', 'bot') : badge('user', 'user')}</td>
+        <td><div class="msg-content">${escHtml(m.content ?? '')}</div></td>
+      </tr>
+    `).join('');
+    setRefresh('done');
+  } catch(e) { setRefresh('done'); console.error(e); }
+}
+
+// ── Tasks ───────────────────────────────────────────────────────────────────
+async function loadTasks() {
+  setRefresh('loading');
+  try {
+    const tasks = await api('/tasks');
+    const tbody = document.getElementById('tasks-tbody');
+    if (!tasks.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No scheduled tasks.</td></tr>';
+      setRefresh('done');
+      return;
+    }
+    tbody.innerHTML = tasks.map(t => `
+      <tr>
+        <td>${t.groupFolder}</td>
+        <td>${badge(t.scheduleType, t.scheduleType)} <span class="mono muted" style="font-size:11px">${t.scheduleValue}</span></td>
+        <td class="muted" style="font-size:12px">${relTime(t.nextRun)}</td>
+        <td class="muted" style="font-size:12px">${relTime(t.lastRun)}</td>
+        <td>${badge(t.status, t.status)}</td>
+        <td><div class="truncate muted" style="max-width:280px;font-size:12px">${escHtml(t.prompt)}</div></td>
+      </tr>
+    `).join('');
+    setRefresh('done');
+  } catch(e) { setRefresh('done'); console.error(e); }
+}
+
+// ── Task Runs ───────────────────────────────────────────────────────────────
+async function loadTaskRuns() {
+  setRefresh('loading');
+  try {
+    const runs = await api('/task-runs?limit=100');
+    const tbody = document.getElementById('runs-tbody');
+    if (!runs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No task run history.</td></tr>';
+      setRefresh('done');
+      return;
+    }
+    tbody.innerHTML = runs.map(r => `
+      <tr>
+        <td class="mono muted" style="font-size:11px;white-space:nowrap">${fmtTime(r.runAt)}</td>
+        <td class="mono muted" style="font-size:11px">${r.taskId.slice(0, 8)}…</td>
+        <td>${fmtDuration(r.durationMs)}${durBar(r.durationMs)}</td>
+        <td>${badge(r.status, r.status)}</td>
+        <td><div class="truncate muted" style="max-width:320px;font-size:12px">${escHtml(r.error ?? r.result ?? '')}</div></td>
+      </tr>
+    `).join('');
+    setRefresh('done');
+  } catch(e) { setRefresh('done'); console.error(e); }
+}
+
+// ── Events ──────────────────────────────────────────────────────────────────
+async function loadEvents() {
+  setRefresh('loading');
+  try {
+    const events = await api('/events?limit=100');
+    renderEventFeed('events-feed', events);
+    setRefresh('done');
+  } catch(e) { setRefresh('done'); console.error(e); }
+}
+
+// ── Utility ─────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Auto-refresh ─────────────────────────────────────────────────────────────
+loadDashboard();
+setInterval(() => refreshView(currentView()), 10000);
+</script>
+</body>
+</html>

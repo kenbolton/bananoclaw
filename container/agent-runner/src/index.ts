@@ -35,6 +35,8 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 interface SessionEntry {
@@ -361,7 +363,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; totalInputTokens: number; totalOutputTokens: number }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -390,6 +392,8 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -468,6 +472,15 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
+    // Accumulate token usage from assistant messages
+    if (message.type === 'assistant') {
+      const usage = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+      if (usage) {
+        totalInputTokens += usage.input_tokens ?? 0;
+        totalOutputTokens += usage.output_tokens ?? 0;
+      }
+    }
+
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       log(`Session initialized: ${newSessionId}`);
@@ -491,8 +504,8 @@ async function runQuery(
   }
 
   ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, inputTokens: ${totalInputTokens}, outputTokens: ${totalOutputTokens}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, totalInputTokens, totalOutputTokens };
 }
 
 async function main(): Promise<void> {
@@ -542,11 +555,15 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  let sessionInputTokens = 0;
+  let sessionOutputTokens = 0;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
       const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      sessionInputTokens += queryResult.totalInputTokens;
+      sessionOutputTokens += queryResult.totalOutputTokens;
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -562,8 +579,8 @@ async function main(): Promise<void> {
         break;
       }
 
-      // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      // Emit session update so host can track it (include cumulative token usage)
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId, inputTokens: sessionInputTokens, outputTokens: sessionOutputTokens });
 
       log('Query ended, waiting for next IPC message...');
 

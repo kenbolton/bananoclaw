@@ -78,6 +78,7 @@ export interface MetricsSummary {
 
 export function getMetricsSummary(db: Database.Database): MetricsSummary {
   const today = new Date().toISOString().slice(0, 10);
+  const todayUnix = Math.floor(new Date().setHours(0,0,0,0) / 1000).toString();
   return {
     totalMessages: (db.prepare('SELECT COUNT(*) as n FROM messages').get() as any).n,
     totalUserMessages: (db.prepare('SELECT COUNT(*) as n FROM messages WHERE is_from_me=0 AND is_bot_message=0').get() as any).n,
@@ -86,6 +87,7 @@ export function getMetricsSummary(db: Database.Database): MetricsSummary {
     scheduledTasks: (db.prepare("SELECT COUNT(*) as n FROM scheduled_tasks WHERE status='active'").get() as any).n,
     taskRunsToday: (db.prepare("SELECT COUNT(*) as n FROM task_run_logs WHERE run_at >= ?").get(today) as any).n,
     taskErrorsToday: (db.prepare("SELECT COUNT(*) as n FROM task_run_logs WHERE run_at >= ? AND status='error'").get(today) as any).n,
+    // todayUnix used if task_run_logs ever switches to unix timestamps (currently ISO)
     avgTaskDurationMs: ((db.prepare("SELECT AVG(duration_ms) as avg FROM task_run_logs WHERE run_at >= date('now','-7 days')").get() as any).avg) ?? null,
   };
 }
@@ -150,16 +152,30 @@ export function getTaskRuns(db: Database.Database, limit = 100): TaskRunRow[] {
 }
 
 export function getHourlyActivity(db: Database.Database, hours = 24): HourlyActivity[] {
-  const since = new Date(Date.now() - hours * 3600_000).toISOString();
+  const sinceIso = new Date(Date.now() - hours * 3600_000).toISOString();
+  const sinceUnix = Math.floor((Date.now() - hours * 3600_000) / 1000).toString();
+
+  // Handle both ISO string timestamps (Signal/Gmail) and Unix second timestamps (WhatsApp/Baileys).
+  // Detection: timestamps starting with '1' or '2' followed by 9+ digits are Unix seconds.
   const rows = db.prepare(`
     SELECT
-      strftime('%Y-%m-%dT%H', timestamp) as hour,
+      CASE
+        WHEN length(timestamp) >= 10 AND timestamp GLOB '[0-9]*' AND CAST(timestamp AS INTEGER) > 1000000000
+          THEN strftime('%Y-%m-%dT%H', CAST(timestamp AS INTEGER), 'unixepoch')
+        ELSE strftime('%Y-%m-%dT%H', timestamp)
+      END as hour,
       SUM(CASE WHEN is_bot_message=1 THEN 1 ELSE 0 END) as botMessages,
       SUM(CASE WHEN is_bot_message=0 AND is_from_me=0 THEN 1 ELSE 0 END) as userMessages
     FROM messages
-    WHERE timestamp >= ? AND is_reaction=0
+    WHERE is_reaction=0 AND (
+      (length(timestamp) >= 10 AND timestamp GLOB '[0-9]*' AND CAST(timestamp AS INTEGER) > 1000000000
+        AND CAST(timestamp AS INTEGER) >= CAST(? AS INTEGER))
+      OR
+      (NOT (length(timestamp) >= 10 AND timestamp GLOB '[0-9]*' AND CAST(timestamp AS INTEGER) > 1000000000)
+        AND timestamp >= ?)
+    )
     GROUP BY hour
     ORDER BY hour ASC
-  `).all(since) as HourlyActivity[];
+  `).all(sinceUnix, sinceIso) as HourlyActivity[];
   return rows;
 }

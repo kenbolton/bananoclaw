@@ -109,7 +109,7 @@ export async function startRemoteControl(
 
   let proc;
   try {
-    proc = spawn('claude', ['remote-control', '--name', 'NanoClaw Remote'], {
+    proc = spawn('claude', ['remote-control', '--yes', '--name', 'NanoClaw Remote'], {
       cwd,
       stdio: ['ignore', stdoutFd, stderrFd],
       detached: true,

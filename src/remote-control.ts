@@ -109,11 +109,17 @@ export async function startRemoteControl(
 
   let proc;
   try {
-    proc = spawn('claude', ['remote-control', '--yes', '--name', 'NanoClaw Remote'], {
+    proc = spawn('claude', ['remote-control', '--name', 'NanoClaw Remote'], {
       cwd,
-      stdio: ['ignore', stdoutFd, stderrFd],
+      stdio: ['pipe', stdoutFd, stderrFd],
       detached: true,
     });
+    // claude remote-control prompts "Enable Remote Control? (y/n)" on first run.
+    // stdin is a pipe so we can answer it; write 'y\n' then close.
+    if (proc.stdin) {
+      proc.stdin.write('y\n');
+      proc.stdin.end();
+    }
   } catch (err: any) {
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);

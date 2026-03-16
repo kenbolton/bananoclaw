@@ -59,8 +59,7 @@ export interface TaskRunRow {
 
 export interface HourlyActivity {
   hour: string; // ISO hour bucket e.g. "2026-03-15T08"
-  userMessages: number;
-  botMessages: number;
+  total: number;
 }
 
 export interface MetricsSummary {
@@ -81,8 +80,8 @@ export function getMetricsSummary(db: Database.Database): MetricsSummary {
   const todayUnix = Math.floor(new Date().setHours(0,0,0,0) / 1000).toString();
   return {
     totalMessages: (db.prepare('SELECT COUNT(*) as n FROM messages').get() as any).n,
-    totalUserMessages: (db.prepare('SELECT COUNT(*) as n FROM messages WHERE is_from_me=0 AND is_bot_message=0').get() as any).n,
-    totalBotMessages: (db.prepare('SELECT COUNT(*) as n FROM messages WHERE is_bot_message=1').get() as any).n,
+    totalUserMessages: (db.prepare('SELECT COUNT(*) as n FROM messages WHERE COALESCE(is_from_me, 0)=0 AND COALESCE(is_reaction, 0)=0').get() as any).n,
+    totalBotMessages: (db.prepare('SELECT COUNT(*) as n FROM messages WHERE COALESCE(is_from_me, 0)=1 AND COALESCE(is_reaction, 0)=0').get() as any).n,
     activeGroups: (db.prepare('SELECT COUNT(*) as n FROM registered_groups').get() as any).n,
     scheduledTasks: (db.prepare("SELECT COUNT(*) as n FROM scheduled_tasks WHERE status='active'").get() as any).n,
     taskRunsToday: (db.prepare("SELECT COUNT(*) as n FROM task_run_logs WHERE run_at >= ?").get(today) as any).n,
@@ -162,10 +161,10 @@ export function getHourlyActivity(db: Database.Database, hours = 24): HourlyActi
       CASE
         WHEN length(timestamp) >= 10 AND timestamp GLOB '[0-9]*' AND CAST(timestamp AS INTEGER) > 1000000000
           THEN strftime('%Y-%m-%dT%H', CAST(timestamp AS INTEGER), 'unixepoch')
-        ELSE strftime('%Y-%m-%dT%H', timestamp)
+        ELSE strftime('%Y-%m-%dT%H', substr(timestamp, 1, 19))
       END as hour,
-      SUM(CASE WHEN is_bot_message=1 THEN 1 ELSE 0 END) as botMessages,
-      SUM(CASE WHEN is_bot_message=0 AND is_from_me=0 THEN 1 ELSE 0 END) as userMessages
+      COUNT(*) as total,
+      0 as placeholder
     FROM messages
     WHERE is_reaction=0 AND (
       (length(timestamp) >= 10 AND timestamp GLOB '[0-9]*' AND CAST(timestamp AS INTEGER) > 1000000000

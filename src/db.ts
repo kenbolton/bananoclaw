@@ -606,7 +606,7 @@ export function getLatestMessage(
   | undefined {
   const row = db
     .prepare(
-      `SELECT id, sender, sender_name, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+      `SELECT id, sender, sender_name, is_from_me FROM messages WHERE chat_jid = ? AND is_reaction = 0 ORDER BY timestamp DESC LIMIT 1`,
     )
     .get(chatJid) as
     | { id: string; sender: string; sender_name: string; is_from_me: number }

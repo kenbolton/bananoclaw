@@ -396,6 +396,8 @@ async function loadDashboard() {
       `${summary.activeGroups} group${summary.activeGroups !== 1 ? 's' : ''} · ${summary.scheduledTasks} active task${summary.scheduledTasks !== 1 ? 's' : ''} · updated ${new Date().toLocaleTimeString()}`;
 
     // Activity chart
+    document.getElementById('activity-range').textContent =
+      `${activity.length} hour bucket${activity.length !== 1 ? 's' : ''} returned`;
     renderActivityChart(activity);
 
     // Events
@@ -406,6 +408,8 @@ async function loadDashboard() {
   } catch (e) {
     setRefresh('done');
     console.error(e);
+    document.getElementById('dash-subtitle').textContent = '⚠ API error: ' + e.message;
+    document.getElementById('activity-range').textContent = 'fetch failed';
   }
 }
 
@@ -424,13 +428,11 @@ function renderActivityChart(data) {
     const d = new Date(h + ':00:00Z');
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   });
-  const userMsgs = hours.map(h => byHour[h]?.userMessages ?? 0);
-  const botMsgs = hours.map(h => byHour[h]?.botMessages ?? 0);
+  const totalMsgs = hours.map(h => { const r = byHour[h]; return r?.total ?? ((r?.inbound ?? 0) + (r?.outbound ?? 0)); });
 
   if (activityChart) {
     activityChart.data.labels = labels;
-    activityChart.data.datasets[0].data = userMsgs;
-    activityChart.data.datasets[1].data = botMsgs;
+    activityChart.data.datasets[0].data = totalMsgs;
     activityChart.update('none');
     return;
   }
@@ -440,8 +442,7 @@ function renderActivityChart(data) {
     data: {
       labels,
       datasets: [
-        { label: 'User', data: userMsgs, backgroundColor: 'rgba(79,195,247,0.5)', borderColor: 'rgba(79,195,247,0.8)', borderWidth: 1 },
-        { label: 'Bot', data: botMsgs, backgroundColor: 'rgba(124,106,247,0.5)', borderColor: 'rgba(124,106,247,0.8)', borderWidth: 1 },
+        { label: 'Messages', data: totalMsgs, backgroundColor: 'rgba(124,106,247,0.5)', borderColor: 'rgba(124,106,247,0.8)', borderWidth: 1 },
       ]
     },
     options: {

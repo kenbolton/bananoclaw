@@ -351,6 +351,19 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
+ * Extract customer message text from the NanoClaw XML context format.
+ * Falls back to the raw text if parsing fails.
+ *
+ * Input:  '<context timezone="..." />\n<messages>\n  <message sender="X" time="...">hello</message>\n</messages>'
+ * Output: 'hello'  (or multiple lines if multiple messages)
+ */
+function stripXmlContext(text: string): string {
+  const matches = [...text.matchAll(/<message\s[^>]*>([^<]*)<\/message>/g)];
+  if (matches.length === 0) return text;
+  return matches.map(m => m[1].trim()).filter(Boolean).join('\n');
+}
+
+/**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
@@ -382,11 +395,23 @@ async function runQuery(
     const messages = drainIpcInput();
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+      // For non-main groups, strip the XML context wrapper and pipe only the
+      // customer message text(s). The model has already seen the format in the
+      // system prompt; raw XML mid-session causes verbatim echo.
+      if (!containerInput.isMain) {
+        const stripped = stripXmlContext(text);
+        stream.push(stripped);
+      } else {
+        stream.push(text);
+      }
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+  // Only enable IPC follow-up piping for the main channel.
+  // Non-main groups (customer bots like Archie) get one clean run per message.
+  if (containerInput.isMain) {
+    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+  }
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -395,12 +420,24 @@ async function runQuery(
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
 
+  // Load group CLAUDE.md as the primary system prompt (defines identity and behavior)
+  const groupClaudeMdPath = '/workspace/group/CLAUDE.md';
+  let groupClaudeMd: string | undefined;
+  if (!containerInput.isMain && fs.existsSync(groupClaudeMdPath)) {
+    groupClaudeMd = fs.readFileSync(groupClaudeMdPath, 'utf-8');
+  }
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
+
+  // Build system prompt: group identity + global operational instructions
+  // Non-main groups use CLAUDE.md as the full system prompt (no preset overlay)
+  const systemPromptParts = [groupClaudeMd, globalClaudeMd].filter(Boolean);
+  const systemPromptContent = systemPromptParts.length > 0 ? systemPromptParts.join('\n\n---\n\n') : undefined;
 
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
@@ -425,9 +462,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
+      systemPrompt: systemPromptContent,
       allowedTools: [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',
@@ -442,7 +477,7 @@ async function runQuery(
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
+      settingSources: containerInput.isMain ? (['project', 'user'] as const) : [],
       mcpServers: {
         nanoclaw: {
           command: 'node',

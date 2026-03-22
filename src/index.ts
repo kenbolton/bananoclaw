@@ -35,7 +35,6 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
-  getDefaultDmGroup,
   getMessagesSince,
   getNewMessages,
   getNewUnregisteredWhatsAppMessages,
@@ -80,6 +79,7 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
+let cachedDefaultDmGroup: RegisteredGroup | undefined;
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
@@ -98,6 +98,9 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+  cachedDefaultDmGroup = Object.values(registeredGroups).find(
+    (g) => g.isDefaultDm === true,
+  );
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -156,6 +159,9 @@ export function _setRegisteredGroups(
   groups: Record<string, RegisteredGroup>,
 ): void {
   registeredGroups = groups;
+  cachedDefaultDmGroup = Object.values(groups).find(
+    (g) => g.isDefaultDm === true,
+  );
 }
 
 /**
@@ -166,8 +172,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let group = registeredGroups[chatJid];
   // Catch-all: route unregistered DMs to the default DM group
   if (!group && chatJid.endsWith('@s.whatsapp.net')) {
-    const defaultDm = getDefaultDmGroup();
-    if (defaultDm) group = defaultDm;
+    if (cachedDefaultDmGroup) group = cachedDefaultDmGroup;
   }
   if (!group) return true;
 
@@ -490,8 +495,7 @@ async function startMessageLoop(): Promise<void> {
           let group = registeredGroups[chatJid];
           // Catch-all: route unregistered DMs to the default DM group
           if (!group && chatJid.endsWith('@s.whatsapp.net')) {
-            const defaultDm = getDefaultDmGroup();
-            if (defaultDm) group = defaultDm;
+            if (cachedDefaultDmGroup) group = cachedDefaultDmGroup;
           }
           if (!group) continue;
 
@@ -577,8 +581,8 @@ async function startMessageLoop(): Promise<void> {
         }
       }
       // Fetch messages from unregistered WhatsApp DMs and route to default DM group
-      const defaultDmGroup = getDefaultDmGroup();
-      if (defaultDmGroup) {
+      if (cachedDefaultDmGroup) {
+        const defaultDmGroup = cachedDefaultDmGroup;
         const jids = Object.keys(registeredGroups);
         const { messages: dmMessages, newTimestamp: dmTimestamp } =
           getNewUnregisteredWhatsAppMessages(
@@ -857,7 +861,7 @@ async function main(): Promise<void> {
         await channel.sendMessage(
           jid,
           text,
-          registeredGroups[jid]?.agentName ?? getDefaultDmGroup()?.agentName,
+          registeredGroups[jid]?.agentName ?? cachedDefaultDmGroup?.agentName,
         );
     },
   });
@@ -868,7 +872,7 @@ async function main(): Promise<void> {
       return channel.sendMessage(
         jid,
         text,
-        registeredGroups[jid]?.agentName ?? getDefaultDmGroup()?.agentName,
+        registeredGroups[jid]?.agentName ?? cachedDefaultDmGroup?.agentName,
       );
     },
     sendReaction: async (jid, messageId, emoji) => {

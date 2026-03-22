@@ -31,8 +31,15 @@ export class PanelEventBus extends EventEmitter {
   private history: AgentEvent[] = [];
   private readonly maxHistory = 200;
 
-  emit(event: PanelEventType, payload: Omit<AgentEvent, 'type' | 'timestamp'>): boolean {
-    const full: AgentEvent = { type: event, timestamp: new Date().toISOString(), ...payload };
+  emit(
+    event: PanelEventType,
+    payload: Omit<AgentEvent, 'type' | 'timestamp'>,
+  ): boolean {
+    const full: AgentEvent = {
+      type: event,
+      timestamp: new Date().toISOString(),
+      ...payload,
+    };
     this.history.push(full);
     if (this.history.length > this.maxHistory) this.history.shift();
     return super.emit(event, full);

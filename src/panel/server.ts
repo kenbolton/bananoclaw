@@ -31,11 +31,11 @@ import { logger } from '../logger.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 function resolvePublicDir(): string {
   const candidates = [
-    path.join(__dirname, 'public'),                        // dist/panel/public (compiled)
-    path.join(process.cwd(), 'src', 'panel', 'public'),   // src/panel/public (dev/tsx)
-    path.join(process.cwd(), 'dist', 'panel', 'public'),  // dist/panel/public (alt)
+    path.join(__dirname, 'public'), // dist/panel/public (compiled)
+    path.join(process.cwd(), 'src', 'panel', 'public'), // src/panel/public (dev/tsx)
+    path.join(process.cwd(), 'dist', 'panel', 'public'), // dist/panel/public (alt)
   ];
-  return candidates.find(p => fs.existsSync(p)) ?? candidates[0];
+  return candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
 }
 
 export interface PanelConfig {
@@ -73,7 +73,7 @@ export function startPanel(config: PanelConfig): http.Server {
           res.writeHead(status, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(body));
         })
-        .catch(err => {
+        .catch((err) => {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: String(err) }));
         });
@@ -81,9 +81,10 @@ export function startPanel(config: PanelConfig): http.Server {
     }
 
     // Static files — serve index.html for all non-API routes (SPA-ready)
-    const filePath = pathname === '/' || !pathname.includes('.')
-      ? path.join(publicDir, 'index.html')
-      : path.join(publicDir, pathname);
+    const filePath =
+      pathname === '/' || !pathname.includes('.')
+        ? path.join(publicDir, 'index.html')
+        : path.join(publicDir, pathname);
 
     fs.readFile(filePath, (err, data) => {
       if (err) {
@@ -98,7 +99,9 @@ export function startPanel(config: PanelConfig): http.Server {
         '.css': 'text/css',
         '.json': 'application/json',
       };
-      res.writeHead(200, { 'Content-Type': mime[ext] ?? 'application/octet-stream' });
+      res.writeHead(200, {
+        'Content-Type': mime[ext] ?? 'application/octet-stream',
+      });
       res.end(data);
     });
   });

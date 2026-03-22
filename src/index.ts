@@ -377,10 +377,13 @@ async function runAgent(
       groupFolder: group.folder,
       chatJid,
       durationMs: Date.now() - agentStart,
-      tokenUsage: output.inputTokens != null ? {
-        inputTokens: output.inputTokens,
-        outputTokens: output.outputTokens,
-      } : undefined,
+      tokenUsage:
+        output.inputTokens != null
+          ? {
+              inputTokens: output.inputTokens,
+              outputTokens: output.outputTokens,
+            }
+          : undefined,
     });
     return 'success';
   } catch (err) {
@@ -503,7 +506,11 @@ async function startMessageLoop(): Promise<void> {
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, group.agentName ?? ASSISTANT_NAME);
+    const pending = getMessagesSince(
+      chatJid,
+      sinceTimestamp,
+      group.agentName ?? ASSISTANT_NAME,
+    );
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },
@@ -531,7 +538,10 @@ async function main(): Promise<void> {
   if (panelPort > 0) {
     const { startPanel } = await import('./panel/server.js');
     const { STORE_DIR } = await import('./config.js');
-    startPanel({ port: panelPort, dbPath: path.join(STORE_DIR, 'messages.db') });
+    startPanel({
+      port: panelPort,
+      dbPath: path.join(STORE_DIR, 'messages.db'),
+    });
   }
 
   // Start credential proxy (containers route API calls through this)
@@ -697,7 +707,8 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text, registeredGroups[jid]?.agentName);
+      if (text)
+        await channel.sendMessage(jid, text, registeredGroups[jid]?.agentName);
     },
   });
   startIpcWatcher({

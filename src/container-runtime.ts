@@ -24,8 +24,10 @@ function detectContainerHostGateway(): string {
         encoding: 'utf-8',
         timeout: 5000,
       });
-      const networks: { id: string; status?: { ipv4Gateway?: string; ipv4Subnet?: string } }[] =
-        JSON.parse(output || '[]');
+      const networks: {
+        id: string;
+        status?: { ipv4Gateway?: string; ipv4Subnet?: string };
+      }[] = JSON.parse(output || '[]');
       const defaultNet = networks.find((n) => n.id === 'default');
       if (defaultNet?.status?.ipv4Gateway) {
         return defaultNet.status.ipv4Gateway;

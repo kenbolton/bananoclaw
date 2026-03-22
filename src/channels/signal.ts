@@ -159,7 +159,11 @@ export class SignalChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string, senderName?: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    senderName?: string,
+  ): Promise<void> {
     const prefixed = `${senderName ?? ASSISTANT_NAME}: ${text}`;
 
     let result: { timestamp?: number } | null = null;

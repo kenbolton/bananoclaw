@@ -77,22 +77,66 @@ export interface MetricsSummary {
 
 export function getMetricsSummary(db: Database.Database): MetricsSummary {
   const today = new Date().toISOString().slice(0, 10);
-  const todayUnix = Math.floor(new Date().setHours(0,0,0,0) / 1000).toString();
+  const todayUnix = Math.floor(
+    new Date().setHours(0, 0, 0, 0) / 1000,
+  ).toString();
   return {
-    totalMessages: (db.prepare('SELECT COUNT(*) as n FROM messages').get() as any).n,
-    totalUserMessages: (db.prepare('SELECT COUNT(*) as n FROM messages WHERE COALESCE(is_from_me, 0)=0 AND COALESCE(is_reaction, 0)=0').get() as any).n,
-    totalBotMessages: (db.prepare('SELECT COUNT(*) as n FROM messages WHERE COALESCE(is_from_me, 0)=1 AND COALESCE(is_reaction, 0)=0').get() as any).n,
-    activeGroups: (db.prepare('SELECT COUNT(*) as n FROM registered_groups').get() as any).n,
-    scheduledTasks: (db.prepare("SELECT COUNT(*) as n FROM scheduled_tasks WHERE status='active'").get() as any).n,
-    taskRunsToday: (db.prepare("SELECT COUNT(*) as n FROM task_run_logs WHERE run_at >= ?").get(today) as any).n,
-    taskErrorsToday: (db.prepare("SELECT COUNT(*) as n FROM task_run_logs WHERE run_at >= ? AND status='error'").get(today) as any).n,
+    totalMessages: (
+      db.prepare('SELECT COUNT(*) as n FROM messages').get() as any
+    ).n,
+    totalUserMessages: (
+      db
+        .prepare(
+          'SELECT COUNT(*) as n FROM messages WHERE COALESCE(is_from_me, 0)=0 AND COALESCE(is_reaction, 0)=0',
+        )
+        .get() as any
+    ).n,
+    totalBotMessages: (
+      db
+        .prepare(
+          'SELECT COUNT(*) as n FROM messages WHERE COALESCE(is_from_me, 0)=1 AND COALESCE(is_reaction, 0)=0',
+        )
+        .get() as any
+    ).n,
+    activeGroups: (
+      db.prepare('SELECT COUNT(*) as n FROM registered_groups').get() as any
+    ).n,
+    scheduledTasks: (
+      db
+        .prepare(
+          "SELECT COUNT(*) as n FROM scheduled_tasks WHERE status='active'",
+        )
+        .get() as any
+    ).n,
+    taskRunsToday: (
+      db
+        .prepare('SELECT COUNT(*) as n FROM task_run_logs WHERE run_at >= ?')
+        .get(today) as any
+    ).n,
+    taskErrorsToday: (
+      db
+        .prepare(
+          "SELECT COUNT(*) as n FROM task_run_logs WHERE run_at >= ? AND status='error'",
+        )
+        .get(today) as any
+    ).n,
     // todayUnix used if task_run_logs ever switches to unix timestamps (currently ISO)
-    avgTaskDurationMs: ((db.prepare("SELECT AVG(duration_ms) as avg FROM task_run_logs WHERE run_at >= date('now','-7 days')").get() as any).avg) ?? null,
+    avgTaskDurationMs:
+      (
+        db
+          .prepare(
+            "SELECT AVG(duration_ms) as avg FROM task_run_logs WHERE run_at >= date('now','-7 days')",
+          )
+          .get() as any
+      ).avg ?? null,
   };
 }
 
 export function getGroups(db: Database.Database): GroupSummary[] {
-  return (db.prepare(`
+  return (
+    db
+      .prepare(
+        `
     SELECT
       rg.jid, rg.name, rg.folder,
       c.channel, rg.agent_name as agentName,
@@ -104,13 +148,23 @@ export function getGroups(db: Database.Database): GroupSummary[] {
     LEFT JOIN messages m ON m.chat_jid = rg.jid
     GROUP BY rg.jid
     ORDER BY c.last_message_time DESC NULLS LAST
-  `).all() as any[]).map(r => ({ ...r, isMain: !!r.isMain }));
+  `,
+      )
+      .all() as any[]
+  ).map((r) => ({ ...r, isMain: !!r.isMain }));
 }
 
-export function getRecentMessages(db: Database.Database, limit = 50, chatJid?: string): MessageRow[] {
+export function getRecentMessages(
+  db: Database.Database,
+  limit = 50,
+  chatJid?: string,
+): MessageRow[] {
   const where = chatJid ? 'WHERE m.chat_jid = ?' : '';
   const params = chatJid ? [chatJid, limit] : [limit];
-  return (db.prepare(`
+  return (
+    db
+      .prepare(
+        `
     SELECT
       m.id, m.chat_jid as chatJid, c.name as chatName,
       m.sender, m.sender_name as senderName, m.content,
@@ -121,7 +175,10 @@ export function getRecentMessages(db: Database.Database, limit = 50, chatJid?: s
     WHERE m.is_reaction = 0
     ORDER BY m.timestamp DESC
     LIMIT ?
-  `).all(...params) as any[]).map(r => ({
+  `,
+      )
+      .all(...params) as any[]
+  ).map((r) => ({
     ...r,
     isFromMe: !!r.isFromMe,
     isBotMessage: !!r.isBotMessage,
@@ -129,7 +186,9 @@ export function getRecentMessages(db: Database.Database, limit = 50, chatJid?: s
 }
 
 export function getTasks(db: Database.Database): TaskRow[] {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     SELECT
       id, group_folder as groupFolder, prompt,
       schedule_type as scheduleType, schedule_value as scheduleValue,
@@ -137,26 +196,39 @@ export function getTasks(db: Database.Database): TaskRow[] {
       last_result as lastResult, status, created_at as createdAt
     FROM scheduled_tasks
     ORDER BY status ASC, next_run ASC
-  `).all() as TaskRow[];
+  `,
+    )
+    .all() as TaskRow[];
 }
 
 export function getTaskRuns(db: Database.Database, limit = 100): TaskRunRow[] {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     SELECT id, task_id as taskId, run_at as runAt,
       duration_ms as durationMs, status, result, error
     FROM task_run_logs
     ORDER BY run_at DESC
     LIMIT ?
-  `).all(limit) as TaskRunRow[];
+  `,
+    )
+    .all(limit) as TaskRunRow[];
 }
 
-export function getHourlyActivity(db: Database.Database, hours = 24): HourlyActivity[] {
+export function getHourlyActivity(
+  db: Database.Database,
+  hours = 24,
+): HourlyActivity[] {
   const sinceIso = new Date(Date.now() - hours * 3600_000).toISOString();
-  const sinceUnix = Math.floor((Date.now() - hours * 3600_000) / 1000).toString();
+  const sinceUnix = Math.floor(
+    (Date.now() - hours * 3600_000) / 1000,
+  ).toString();
 
   // Handle both ISO string timestamps (Signal/Gmail) and Unix second timestamps (WhatsApp/Baileys).
   // Detection: timestamps starting with '1' or '2' followed by 9+ digits are Unix seconds.
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT
       CASE
         WHEN length(timestamp) >= 10 AND timestamp GLOB '[0-9]*' AND CAST(timestamp AS INTEGER) > 1000000000
@@ -175,6 +247,8 @@ export function getHourlyActivity(db: Database.Database, hours = 24): HourlyActi
     )
     GROUP BY hour
     ORDER BY hour ASC
-  `).all(sinceUnix, sinceIso) as HourlyActivity[];
+  `,
+    )
+    .all(sinceUnix, sinceIso) as HourlyActivity[];
   return rows;
 }

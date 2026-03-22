@@ -54,18 +54,28 @@ export async function handleRoute(
     }
 
     case '/api/events':
-      return { status: 200, body: events.recent(parseInt(params.limit ?? '50')) };
+      return {
+        status: 200,
+        body: events.recent(parseInt(params.limit ?? '50')),
+      };
 
     case '/api/debug': {
       // Returns sample timestamps from the DB to help diagnose format issues.
-      const rows = db.prepare(
-        `SELECT id, timestamp, length(timestamp) as len, CAST(timestamp AS INTEGER) as asInt FROM messages WHERE is_reaction=0 ORDER BY rowid DESC LIMIT 10`
-      ).all();
+      const rows = db
+        .prepare(
+          `SELECT id, timestamp, length(timestamp) as len, CAST(timestamp AS INTEGER) as asInt FROM messages WHERE is_reaction=0 ORDER BY rowid DESC LIMIT 10`,
+        )
+        .all();
       const since = new Date(Date.now() - 24 * 3600_000).toISOString();
-      const count = (db.prepare(
-        `SELECT COUNT(*) as n FROM messages WHERE is_reaction=0`
-      ).get() as any).n;
-      return { status: 200, body: { samples: rows, sinceIso: since, totalNonReaction: count } };
+      const count = (
+        db
+          .prepare(`SELECT COUNT(*) as n FROM messages WHERE is_reaction=0`)
+          .get() as any
+      ).n;
+      return {
+        status: 200,
+        body: { samples: rows, sinceIso: since, totalNonReaction: count },
+      };
     }
 
     default:

@@ -10,6 +10,7 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -19,7 +20,9 @@ import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
@@ -200,7 +203,25 @@ function buildVolumeMounts(
       group.name,
       isMain,
     );
-    mounts.push(...validatedMounts);
+    // Deduplicate: Apple Container assigns VirtioFS tags based on host path.
+    // Mounting the same host path twice (e.g. project root via built-in mount
+    // and again via an additional mount) causes a duplicate-tag boot failure.
+    const existingHostPaths = new Set(mounts.map((m) => m.hostPath));
+    for (const m of validatedMounts) {
+      if (existingHostPaths.has(m.hostPath)) {
+        logger.warn(
+          {
+            group: group.name,
+            hostPath: m.hostPath,
+            containerPath: m.containerPath,
+          },
+          'Skipping duplicate additional mount (host path already mounted)',
+        );
+      } else {
+        mounts.push(m);
+        existingHostPaths.add(m.hostPath);
+      }
+    }
   }
 
   return mounts;
@@ -229,6 +250,16 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Route API traffic through the credential proxy so lone surrogates
+  // are sanitized before reaching the Anthropic API (HTTP 400 prevention).
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  );
+
+  // Runtime-specific args for host gateway resolution (Linux only)
+  args.push(...hostGatewayArgs());
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),

@@ -65,6 +65,7 @@ describe('ensureContainerRuntimeRunning', () => {
     expect(logger.debug).toHaveBeenCalledWith(
       'Container runtime already running',
     );
+    expect(logger.debug).toHaveBeenCalledWith('Container runtime already running');
   });
 
   it('auto-starts when system status fails', () => {

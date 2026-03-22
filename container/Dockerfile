@@ -7,7 +7,6 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
-    fonts-noto-cjk \
     fonts-noto-color-emoji \
     libgbm1 \
     libnss3 \
@@ -68,6 +67,7 @@ RUN chmod +x /app/entrypoint.sh
 RUN chown -R node:node /workspace && chmod 777 /home/node
 
 # Do NOT set USER — entrypoint starts as root for mount --bind, then drops privileges.
+
 
 # Set working directory to group workspace
 WORKDIR /workspace/group

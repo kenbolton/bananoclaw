@@ -581,7 +581,11 @@ async function startMessageLoop(): Promise<void> {
       if (defaultDmGroup) {
         const jids = Object.keys(registeredGroups);
         const { messages: dmMessages, newTimestamp: dmTimestamp } =
-          getNewUnregisteredWhatsAppMessages(jids, lastTimestamp, ASSISTANT_NAME);
+          getNewUnregisteredWhatsAppMessages(
+            jids,
+            lastTimestamp,
+            ASSISTANT_NAME,
+          );
 
         if (dmMessages.length > 0) {
           if (dmTimestamp > lastTimestamp) {
@@ -616,13 +620,17 @@ async function startMessageLoop(): Promise<void> {
                 { chatJid },
                 'Piped unregistered DM messages to active container',
               );
-              const msgs = allPending.length > 0 ? allPending : byJid.get(chatJid)!;
+              const msgs =
+                allPending.length > 0 ? allPending : byJid.get(chatJid)!;
               lastAgentTimestamp[chatJid] = msgs[msgs.length - 1].timestamp;
               saveState();
               channel
                 .setTyping?.(chatJid, true)
                 ?.catch((err) =>
-                  logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to set typing indicator',
+                  ),
                 );
             } else {
               queue.enqueueMessageCheck(chatJid);
@@ -845,14 +853,23 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text, (registeredGroups[jid]?.agentName ?? getDefaultDmGroup()?.agentName));
+      if (text)
+        await channel.sendMessage(
+          jid,
+          text,
+          registeredGroups[jid]?.agentName ?? getDefaultDmGroup()?.agentName,
+        );
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text, (registeredGroups[jid]?.agentName ?? getDefaultDmGroup()?.agentName));
+      return channel.sendMessage(
+        jid,
+        text,
+        registeredGroups[jid]?.agentName ?? getDefaultDmGroup()?.agentName,
+      );
     },
     sendReaction: async (jid, messageId, emoji) => {
       const channel = findChannel(channels, jid);

@@ -213,10 +213,17 @@ export class WhatsAppChannel implements Channel {
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content) continue;
 
-            const sender = msg.key.participant || msg.key.remoteJid || '';
+            // For fromMe messages in DMs, use the bot's own JID as sender (not remoteJid)
+            const fromMe = msg.key.fromMe || false;
+            const botJid = this.sock.user?.id?.split(':')[0]
+              ? `${this.sock.user.id.split(':')[0]}@s.whatsapp.net`
+              : undefined;
+            const sender =
+              fromMe && !msg.key.participant && botJid
+                ? botJid
+                : msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
 
-            const fromMe = msg.key.fromMe || false;
             // Detect bot messages: with own number, fromMe is reliable
             // since only the bot sends from that number.
             // With shared number, bot messages carry the assistant name prefix
@@ -246,14 +253,20 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    senderName?: string,
+  ): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
-    // Skip only when the assistant has its own dedicated phone number.
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER
-      ? text
-      : `${ASSISTANT_NAME}: ${text}`;
+    const name = senderName !== undefined ? senderName : ASSISTANT_NAME;
+    // When senderName is explicitly provided, always prefix (even on own-number setups).
+    // This lets Archie, Otter, Kit etc. prefix their messages for identification,
+    // while own-number messages without an explicit name send clean (no prefix).
+    const shouldPrefix = senderName !== undefined || !ASSISTANT_HAS_OWN_NUMBER;
+    const prefixed = shouldPrefix && name !== '' ? `${name}: ${text}` : text;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });

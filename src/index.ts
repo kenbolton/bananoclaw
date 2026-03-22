@@ -35,8 +35,11 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getDefaultDmGroup,
   getMessagesSince,
   getNewMessages,
+  getNewUnregisteredWhatsAppMessages,
+  getRegisteredGroup,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -160,7 +163,12 @@ export function _setRegisteredGroups(
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
+  let group = registeredGroups[chatJid];
+  // Catch-all: route unregistered DMs to the default DM group
+  if (!group && chatJid.endsWith('@s.whatsapp.net')) {
+    const defaultDm = getDefaultDmGroup();
+    if (defaultDm) group = defaultDm;
+  }
   if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
@@ -339,7 +347,9 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  // For default-DM groups, each customer gets their own session keyed by chatJid
+  const sessionKey = group.isDefaultDm ? chatJid : group.folder;
+  const sessionId = sessions[sessionKey];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -370,8 +380,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[sessionKey] = output.newSessionId;
+          setSession(sessionKey, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -397,8 +407,8 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[sessionKey] = output.newSessionId;
+      setSession(sessionKey, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -477,7 +487,12 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
+          let group = registeredGroups[chatJid];
+          // Catch-all: route unregistered DMs to the default DM group
+          if (!group && chatJid.endsWith('@s.whatsapp.net')) {
+            const defaultDm = getDefaultDmGroup();
+            if (defaultDm) group = defaultDm;
+          }
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
@@ -558,6 +573,60 @@ async function startMessageLoop(): Promise<void> {
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
+          }
+        }
+      }
+      // Fetch messages from unregistered WhatsApp DMs and route to default DM group
+      const defaultDmGroup = getDefaultDmGroup();
+      if (defaultDmGroup) {
+        const jids = Object.keys(registeredGroups);
+        const { messages: dmMessages, newTimestamp: dmTimestamp } =
+          getNewUnregisteredWhatsAppMessages(jids, lastTimestamp, ASSISTANT_NAME);
+
+        if (dmMessages.length > 0) {
+          if (dmTimestamp > lastTimestamp) {
+            lastTimestamp = dmTimestamp;
+            saveState();
+          }
+
+          // Group by sender JID and enqueue each for processing
+          const byJid = new Map<string, NewMessage[]>();
+          for (const msg of dmMessages) {
+            const existing = byJid.get(msg.chat_jid);
+            if (existing) existing.push(msg);
+            else byJid.set(msg.chat_jid, [msg]);
+          }
+
+          for (const [chatJid] of byJid) {
+            const channel = findChannel(channels, chatJid);
+            if (!channel) continue;
+
+            const allPending = getMessagesSince(
+              chatJid,
+              lastAgentTimestamp[chatJid] || '',
+              defaultDmGroup.agentName ?? ASSISTANT_NAME,
+            );
+            const formatted = formatMessages(
+              allPending.length > 0 ? allPending : byJid.get(chatJid)!,
+              TIMEZONE,
+            );
+
+            if (queue.sendMessage(chatJid, formatted)) {
+              logger.debug(
+                { chatJid },
+                'Piped unregistered DM messages to active container',
+              );
+              const msgs = allPending.length > 0 ? allPending : byJid.get(chatJid)!;
+              lastAgentTimestamp[chatJid] = msgs[msgs.length - 1].timestamp;
+              saveState();
+              channel
+                .setTyping?.(chatJid, true)
+                ?.catch((err) =>
+                  logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+                );
+            } else {
+              queue.enqueueMessageCheck(chatJid);
+            }
           }
         }
       }
@@ -776,15 +845,14 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text)
-        await channel.sendMessage(jid, text, registeredGroups[jid]?.agentName);
+      if (text) await channel.sendMessage(jid, text, (registeredGroups[jid]?.agentName ?? getDefaultDmGroup()?.agentName));
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text, registeredGroups[jid]?.agentName);
+      return channel.sendMessage(jid, text, (registeredGroups[jid]?.agentName ?? getDefaultDmGroup()?.agentName));
     },
     sendReaction: async (jid, messageId, emoji) => {
       const channel = findChannel(channels, jid);

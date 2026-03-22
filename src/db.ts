@@ -147,6 +147,15 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add is_default_dm column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN is_default_dm INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add reaction columns to messages if they don't exist (migration for existing DBs)
   try {
     database.exec(
@@ -422,6 +431,53 @@ export function getNewMessages(
   return { messages: rows, newTimestamp };
 }
 
+/**
+ * Fetch new messages from WhatsApp DM JIDs that are NOT in the registered groups list.
+ * Used to power the catch-all DM routing to the default DM group.
+ */
+export function getNewUnregisteredWhatsAppMessages(
+  registeredJids: string[],
+  lastTimestamp: string,
+  botPrefix: string,
+  limit = 200,
+): { messages: NewMessage[]; newTimestamp: string } {
+  const placeholders =
+    registeredJids.length > 0
+      ? registeredJids.map(() => '?').join(',')
+      : 'NULL';
+
+  const sql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+             quoted_message_id, quote_sender_name, quote_content, is_reaction,
+             reaction_emoji, reaction_target_timestamp, reaction_target_author
+      FROM messages
+      WHERE timestamp > ?
+        AND chat_jid LIKE '%@s.whatsapp.net'
+        AND chat_jid NOT IN (${placeholders})
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+
+  const rows = db
+    .prepare(sql)
+    .all(
+      lastTimestamp,
+      ...(registeredJids.length > 0 ? registeredJids : []),
+      `${botPrefix}:%`,
+      limit,
+    ) as NewMessage[];
+
+  let newTimestamp = lastTimestamp;
+  for (const row of rows) {
+    if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
+  }
+  return { messages: rows, newTimestamp };
+}
+
 export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
@@ -682,6 +738,7 @@ export function getRegisteredGroup(
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
+        is_default_dm: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -705,6 +762,7 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
+    isDefaultDm: row.is_default_dm === 1 ? true : undefined,
   };
 }
 
@@ -739,6 +797,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    is_default_dm: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -761,9 +820,15 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
+      isDefaultDm: row.is_default_dm === 1 ? true : undefined,
     };
   }
   return result;
+}
+
+export function getDefaultDmGroup(): RegisteredGroup | undefined {
+  const rows = getAllRegisteredGroups();
+  return Object.values(rows).find((g) => g.isDefaultDm === true);
 }
 
 // --- JSON migration ---

@@ -66,6 +66,15 @@ systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
 
+## When to Restart
+
+A service restart (`launchctl kickstart -k gui/$(id -u)/com.nanoclaw`) is required after:
+- Any database change (registered groups, container config, sender allowlist)
+- `npm run build` changes to source
+- Changes to `.env`
+
+Database changes (SQLite) are **not** picked up at runtime — the process must restart to re-read group configs.
+
 ## Troubleshooting
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.

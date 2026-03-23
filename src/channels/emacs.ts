@@ -124,7 +124,7 @@ export class EmacsBridgeChannel implements Channel {
         });
 
         res
-          .writeHead(200, { 'Content-Type': 'application/json' })
+          .writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
           .end(JSON.stringify({ messageId: msgId, timestamp: Date.now() }));
 
         logger.info({ length: text.length }, 'Emacs message received');
@@ -139,7 +139,7 @@ export class EmacsBridgeChannel implements Channel {
     const since = parseInt(url.searchParams.get('since') ?? '0', 10);
     const messages = this.buffer.filter((m) => m.timestamp > since);
     res
-      .writeHead(200, { 'Content-Type': 'application/json' })
+      .writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       .end(JSON.stringify({ messages }));
   }
 

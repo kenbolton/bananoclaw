@@ -1,5 +1,7 @@
+import { execFileSync, execSync } from 'child_process';
 import http from 'http';
 import type { AddressInfo } from 'net';
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // --- Mocks (hoisted — must appear before any imports of the modules they replace) ---
@@ -435,5 +437,89 @@ describe('EmacsBridgeChannel', () => {
         await noAuthChannel.disconnect();
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nanoclaw--md-to-org-regex (Emacs Lisp, tested via emacs --batch)
+
+function emacsAvailable(): boolean {
+  try {
+    execSync('emacs --version', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function mdToOrg(input: string): string {
+  const elFile = path.resolve('emacs/nanoclaw.el');
+  // Escape input as an Emacs string literal — no shell involved so no shell quoting needed
+  const escaped = input
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n');
+  // execFileSync passes args as an array (no shell), bypassing both shell quoting
+  // and the vi.mock('fs') stub that would block writeFileSync
+  return execFileSync(
+    'emacs',
+    ['--batch', '--load', elFile, '--eval', `(princ (nanoclaw--md-to-org-regex "${escaped}"))`],
+    { encoding: 'utf8' },
+  );
+}
+
+describe.skipIf(!emacsAvailable())('nanoclaw--md-to-org-regex', () => {
+  it('converts bold **text** → *text*', () => {
+    expect(mdToOrg('**hello**')).toBe('*hello*');
+  });
+
+  it('converts italic *text* → /text/', () => {
+    expect(mdToOrg('*hello*')).toBe('/hello/');
+  });
+
+  it('handles bold before italic in the same string', () => {
+    expect(mdToOrg('**bold** and *italic*')).toBe('*bold* and /italic/');
+  });
+
+  it('converts strikethrough ~~text~~ → +text+', () => {
+    expect(mdToOrg('~~gone~~')).toBe('+gone+');
+  });
+
+  it('converts underline __text__ → _text_', () => {
+    expect(mdToOrg('__under__')).toBe('_under_');
+  });
+
+  it('converts inline code `code` → ~code~', () => {
+    expect(mdToOrg('`foo()`')).toBe('~foo()~');
+  });
+
+  it('converts fenced code block with language', () => {
+    expect(mdToOrg('```typescript\nconst x = 1;\n```')).toBe(
+      '#+begin_src typescript\nconst x = 1;\n#+end_src',
+    );
+  });
+
+  it('converts fenced code block without language', () => {
+    expect(mdToOrg('```\nhello\n```')).toBe(
+      '#+begin_src text\nhello\n#+end_src',
+    );
+  });
+
+  it('converts ## heading → ** heading', () => {
+    expect(mdToOrg('## Section')).toBe('** Section');
+  });
+
+  it('converts ### heading → *** heading', () => {
+    expect(mdToOrg('### Deep')).toBe('*** Deep');
+  });
+
+  it('leaves list items unchanged', () => {
+    expect(mdToOrg('- item one')).toBe('- item one');
+  });
+
+  it('converts links [text](url) → [[url][text]]', () => {
+    expect(mdToOrg('[NanoClaw](https://example.com)')).toBe(
+      '[[https://example.com][NanoClaw]]',
+    );
   });
 });

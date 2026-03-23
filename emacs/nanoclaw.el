@@ -103,6 +103,7 @@ Tries pandoc -f gfm -t org when available; falls back to regex."
   "Lightweight markdown → org conversion using regexp substitutions."
   (let ((s text))
     ;; Fenced code blocks  ```lang\n…\n```  →  #+begin_src lang\n…\n#+end_src
+    ;; (must run before inline-code to avoid mangling backticks)
     (setq s (replace-regexp-in-string
              "```\\([a-zA-Z0-9_-]*\\)\n\\(\\(?:.\\|\n\\)*?\\)```"
              (lambda (m)
@@ -111,15 +112,25 @@ Tries pandoc -f gfm -t org when available; falls back to regex."
                  (concat "#+begin_src " (if (string-empty-p lang) "text" lang)
                          "\n" body "#+end_src")))
              s t))
+    ;; Bold **text** → *text*, italic *text* → /text/
+    ;; Two-pass to prevent the italic regex from re-matching the bold result:
+    ;; 1. Mark bold spans with a placeholder (control char \x01)
+    (setq s (replace-regexp-in-string "\\*\\*\\(.+?\\)\\*\\*" "\x01\\1\x01" s))
+    ;; 2. Convert remaining single-star spans to italic
+    (setq s (replace-regexp-in-string "\\*\\(.+?\\)\\*" "/\\1/" s))
+    ;; 3. Resolve bold placeholders to org bold markers
+    (setq s (replace-regexp-in-string "\x01\\(.+?\\)\x01" "*\\1*" s))
+    ;; Strikethrough  ~~text~~ → +text+
+    (setq s (replace-regexp-in-string "~~\\(.+?\\)~~" "+\\1+" s))
+    ;; Underline  __text__ → _text_
+    (setq s (replace-regexp-in-string "__\\(.+?\\)__" "_\\1_" s))
+    ;; Inline code  `code` → ~code~
+    (setq s (replace-regexp-in-string "`\\([^`]+\\)`" "~\\1~" s))
     ;; ATX headings  ## …  →  ** …
     (setq s (replace-regexp-in-string
              "^\\(#+\\) "
              (lambda (m) (concat (make-string (length (match-string 1 m)) ?*) " "))
              s))
-    ;; Bold  **text** → *text*
-    (setq s (replace-regexp-in-string "\\*\\*\\(.+?\\)\\*\\*" "*\\1*" s))
-    ;; Inline code  `code` → ~code~
-    (setq s (replace-regexp-in-string "`\\([^`]+\\)`" "~\\1~" s))
     ;; Links  [text](url) → [[url][text]]
     (setq s (replace-regexp-in-string
              "\\[\\([^]]+\\)\\](\\([^)]+\\))" "[[\\2][\\1]]" s))

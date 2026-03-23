@@ -31,10 +31,11 @@ If it exists, skip to Phase 3 (Setup). The code changes are already in place.
 
 ## Phase 2: Apply Code Changes
 
-The Emacs channel code lives on `develop` at commit `7edef2b`. Apply it with cherry-pick:
+The Emacs channel code lives on the `feature/emacs-channel` branch in the `kenbolton/bananoclaw` fork. Fetch and merge it:
 
 ```bash
-git cherry-pick 7edef2b
+git fetch https://github.com/kenbolton/bananoclaw.git feature/emacs-channel
+git merge FETCH_HEAD --no-edit
 ```
 
 This adds:

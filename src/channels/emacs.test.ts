@@ -463,7 +463,13 @@ function mdToOrg(input: string): string {
   // and the vi.mock('fs') stub that would block writeFileSync
   return execFileSync(
     'emacs',
-    ['--batch', '--load', elFile, '--eval', `(princ (nanoclaw--md-to-org-regex "${escaped}"))`],
+    [
+      '--batch',
+      '--load',
+      elFile,
+      '--eval',
+      `(princ (nanoclaw--md-to-org-regex "${escaped}"))`,
+    ],
     { encoding: 'utf8' },
   );
 }

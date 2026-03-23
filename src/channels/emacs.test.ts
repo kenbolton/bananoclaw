@@ -94,7 +94,8 @@ async function req(
 
 /** Read the actual bound port after connect() (server listens on port 0). */
 function boundPort(channel: EmacsBridgeChannel): number {
-  return (((channel as any).server as http.Server).address() as AddressInfo).port;
+  return (((channel as any).server as http.Server).address() as AddressInfo)
+    .port;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +168,9 @@ describe('EmacsBridgeChannel', () => {
 
     it('mutates the live registeredGroups map immediately (no restart needed)', async () => {
       const groups: Record<string, any> = {};
-      const localOpts = createTestOpts({ registeredGroups: vi.fn(() => groups) });
+      const localOpts = createTestOpts({
+        registeredGroups: vi.fn(() => groups),
+      });
       const c = new EmacsBridgeChannel(0, null, localOpts);
       await c.connect();
       expect(groups['emacs:default']).toBeDefined();
@@ -332,7 +335,11 @@ describe('EmacsBridgeChannel', () => {
 
     it('pushes exact text to the buffer', async () => {
       await channel.sendMessage('emacs:default', 'response text');
-      const { data } = await req(boundPort(channel), 'GET', '/api/messages?since=0');
+      const { data } = await req(
+        boundPort(channel),
+        'GET',
+        '/api/messages?since=0',
+      );
       expect(data.messages[0].text).toBe('response text');
     });
 
@@ -340,7 +347,11 @@ describe('EmacsBridgeChannel', () => {
       const before = Date.now();
       await channel.sendMessage('emacs:default', 'ts-check');
       const after = Date.now();
-      const { data } = await req(boundPort(channel), 'GET', '/api/messages?since=0');
+      const { data } = await req(
+        boundPort(channel),
+        'GET',
+        '/api/messages?since=0',
+      );
       expect(data.messages[0].timestamp).toBeGreaterThanOrEqual(before);
       expect(data.messages[0].timestamp).toBeLessThanOrEqual(after);
     });
@@ -414,7 +425,11 @@ describe('EmacsBridgeChannel', () => {
       await noAuthChannel.connect();
       const noAuthPort = boundPort(noAuthChannel);
       try {
-        const { status } = await req(noAuthPort, 'GET', '/api/messages?since=0');
+        const { status } = await req(
+          noAuthPort,
+          'GET',
+          '/api/messages?since=0',
+        );
         expect(status).toBe(200);
       } finally {
         await noAuthChannel.disconnect();

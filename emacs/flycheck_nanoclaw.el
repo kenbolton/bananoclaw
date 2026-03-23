@@ -21,6 +21,10 @@
 ;;         :prefix ("N" . "NanoClaw")
 ;;         :desc "Chat buffer" "c" #'nanoclaw-chat
 ;;         :desc "Send org"    "o" #'nanoclaw-org-send)
+;;   ;; Evil users: teach evil about the C-c C-c send binding
+;;   (after! evil
+;;     (evil-define-key '(normal insert) nanoclaw-chat-mode-map
+;;       (kbd "C-c C-c") #'nanoclaw-chat-send))
 
 ;;; Code:
 
@@ -211,7 +215,9 @@ for multi-line input; send with C-c C-c."
   (visual-line-mode 1)
   ;; Disable org features that conflict with a linear chat buffer
   (setq-local org-return-follows-link nil)
-  (setq-local org-cycle-emulate-tab nil))
+  (setq-local org-cycle-emulate-tab nil)
+  ;; Ensure send binding beats org-mode's C-c C-c via the buffer-local map
+  (local-set-key (kbd "C-c C-c") #'nanoclaw-chat-send))
 
 (defun nanoclaw--advance-input-beg ()
   "Move `nanoclaw--input-beg' to point-max in the chat buffer."

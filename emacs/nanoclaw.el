@@ -62,6 +62,68 @@ Leave nil if EMACS_AUTH_TOKEN is not set."
   :type 'string
   :group 'nanoclaw)
 
+(defcustom nanoclaw-convert-to-org t
+  "When non-nil, convert agent responses to org-mode format.
+Uses pandoc when available; falls back to regex substitutions."
+  :type 'boolean
+  :group 'nanoclaw)
+
+(defcustom nanoclaw-timestamp-format "%H:%M"
+  "Format string for timestamps shown next to agent replies in the chat buffer.
+Passed to `format-time-string'.  Set to nil to suppress timestamps."
+  :type '(choice (const nil) string)
+  :group 'nanoclaw)
+
+;; ---------------------------------------------------------------------------
+;; Formatting helpers
+
+(defun nanoclaw--to-org (text)
+  "Convert TEXT (markdown or plain) to org-mode markup.
+Tries pandoc -f gfm -t org when available; falls back to regex."
+  (if (not nanoclaw-convert-to-org)
+      text
+    (if (executable-find "pandoc")
+        (with-temp-buffer
+          (insert text)
+          (let ((exit (call-process-region
+                       (point-min) (point-max)
+                       "pandoc" t t nil "-f" "gfm" "-t" "org" "--wrap=none")))
+            (if (zerop exit)
+                (string-trim (buffer-string))
+              text)))
+      (nanoclaw--md-to-org-regex text))))
+
+(defun nanoclaw--md-to-org-regex (text)
+  "Lightweight markdown → org conversion using regexp substitutions."
+  (let ((s text))
+    ;; Fenced code blocks  ```lang\n…\n```  →  #+begin_src lang\n…\n#+end_src
+    (setq s (replace-regexp-in-string
+             "```\\([a-zA-Z0-9_-]*\\)\n\\(\\(?:.\\|\n\\)*?\\)```"
+             (lambda (m)
+               (let ((lang (match-string 1 m))
+                     (body (match-string 2 m)))
+                 (concat "#+begin_src " (if (string-empty-p lang) "text" lang)
+                         "\n" body "#+end_src")))
+             s t))
+    ;; ATX headings  ## …  →  ** …
+    (setq s (replace-regexp-in-string
+             "^\\(#+\\) "
+             (lambda (m) (concat (make-string (length (match-string 1 m)) ?*) " "))
+             s))
+    ;; Bold  **text** → *text*
+    (setq s (replace-regexp-in-string "\\*\\*\\(.+?\\)\\*\\*" "*\\1*" s))
+    ;; Inline code  `code` → ~code~
+    (setq s (replace-regexp-in-string "`\\([^`]+\\)`" "~\\1~" s))
+    ;; Links  [text](url) → [[url][text]]
+    (setq s (replace-regexp-in-string
+             "\\[\\([^]]+\\)\\](\\([^)]+\\))" "[[\\2][\\1]]" s))
+    s))
+
+(defun nanoclaw--format-timestamp ()
+  "Return a formatted timestamp string, or nil if disabled."
+  (when nanoclaw-timestamp-format
+    (format-time-string nanoclaw-timestamp-format)))
+
 ;; ---------------------------------------------------------------------------
 ;; Internal state
 
@@ -156,13 +218,15 @@ Leave nil if EMACS_AUTH_TOKEN is not set."
 (defun nanoclaw--chat-insert (speaker text)
   "Append SPEAKER: TEXT to the chat buffer."
   (with-current-buffer (nanoclaw--chat-buffer)
-    (let ((inhibit-read-only t))
+    (let* ((inhibit-read-only t)
+           (is-agent (not (string= speaker "You")))
+           (display-text (if is-agent (nanoclaw--to-org text) text))
+           (ts (and is-agent (nanoclaw--format-timestamp)))
+           (label (if ts (format "%s [%s]" speaker ts) speaker))
+           (face  (if is-agent 'font-lock-string-face 'font-lock-keyword-face)))
       (goto-char (point-max))
-      (let ((face (if (string= speaker "You")
-                      'font-lock-keyword-face
-                    'font-lock-string-face)))
-        (insert (propertize (concat speaker ": ") 'face face)))
-      (insert text "\n\n")
+      (insert (propertize (concat label ": ") 'face face))
+      (insert display-text "\n\n")
       (goto-char (point-max)))))
 
 ;;;###autoload
@@ -269,10 +333,11 @@ If a region is active, send the region text instead."
   (org-back-to-heading t)
   (let* ((level (org-outline-level))
          (child-stars (make-string (1+ level) ?*))
-         (timestamp (format-time-string "[%Y-%m-%d %a %H:%M]")))
+         (timestamp (format-time-string "[%Y-%m-%d %a %H:%M]"))
+         (body (nanoclaw--to-org text)))
     (org-end-of-subtree t t)
     (insert "\n" child-stars " " nanoclaw-agent-name " " timestamp "\n"
-            text "\n")))
+            body "\n")))
 
 (defun nanoclaw--now-ms ()
   "Return current time as milliseconds since epoch."

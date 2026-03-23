@@ -195,10 +195,16 @@ Tries pandoc -f gfm -t org when available; falls back to regex."
     map)
   "Keymap for `nanoclaw-chat-mode'.")
 
-(define-derived-mode nanoclaw-chat-mode fundamental-mode "NanoClaw"
-  "Major mode for the NanoClaw chat buffer."
+(define-derived-mode nanoclaw-chat-mode org-mode "NanoClaw"
+  "Major mode for the NanoClaw chat buffer.
+Derives from org-mode so that org markup (headings, bold, code blocks,
+etc.) is fontified automatically.  Sending is bound to RET and C-RET;
+org's own RET behaviour is suppressed in favour of newline-and-indent."
   (setq-local word-wrap t)
-  (visual-line-mode 1))
+  (visual-line-mode 1)
+  ;; Disable org features that conflict with a linear chat buffer
+  (setq-local org-return-follows-link nil)
+  (setq-local org-cycle-emulate-tab nil))
 
 (defun nanoclaw--chat-buffer ()
   "Return the NanoClaw chat buffer, creating it if necessary."

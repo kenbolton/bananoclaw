@@ -84,7 +84,10 @@ export class EmacsBridgeChannel implements Channel {
 
   // --- Private helpers ---
 
-  private checkAuth(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  private checkAuth(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): boolean {
     if (!this.authToken) return true;
     const header = req.headers['authorization'] ?? '';
     if (header === `Bearer ${this.authToken}`) return true;
@@ -92,7 +95,10 @@ export class EmacsBridgeChannel implements Channel {
     return false;
   }
 
-  private handlePost(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private handlePost(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
@@ -117,9 +123,9 @@ export class EmacsBridgeChannel implements Channel {
           is_from_me: false,
         });
 
-        res.writeHead(200, { 'Content-Type': 'application/json' }).end(
-          JSON.stringify({ messageId: msgId, timestamp: Date.now() }),
-        );
+        res
+          .writeHead(200, { 'Content-Type': 'application/json' })
+          .end(JSON.stringify({ messageId: msgId, timestamp: Date.now() }));
 
         logger.info({ length: text.length }, 'Emacs message received');
       } catch (err) {
@@ -132,9 +138,9 @@ export class EmacsBridgeChannel implements Channel {
   private handlePoll(url: URL, res: http.ServerResponse): void {
     const since = parseInt(url.searchParams.get('since') ?? '0', 10);
     const messages = this.buffer.filter((m) => m.timestamp > since);
-    res.writeHead(200, { 'Content-Type': 'application/json' }).end(
-      JSON.stringify({ messages }),
-    );
+    res
+      .writeHead(200, { 'Content-Type': 'application/json' })
+      .end(JSON.stringify({ messages }));
   }
 
   private ensureGroupRegistered(): void {
@@ -173,7 +179,10 @@ export class EmacsBridgeChannel implements Channel {
       const stat = fs.lstatSync(emacsDir);
       if (stat.isSymbolicLink()) return; // already set up
       // Exists as a real directory — leave it alone
-      logger.debug({ emacsDir }, 'Emacs groups dir already exists as a directory');
+      logger.debug(
+        { emacsDir },
+        'Emacs groups dir already exists as a directory',
+      );
       return;
     } catch {
       // Does not exist — create it
@@ -188,7 +197,10 @@ export class EmacsBridgeChannel implements Channel {
       fs.symlinkSync(targetDir, emacsDir);
       logger.info({ target: targetDir }, 'Created groups/emacs symlink');
     } catch (err) {
-      logger.error({ err }, 'Emacs channel: failed to create groups/emacs symlink');
+      logger.error(
+        { err },
+        'Emacs channel: failed to create groups/emacs symlink',
+      );
     }
   }
 }

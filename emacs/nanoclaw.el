@@ -5,14 +5,22 @@
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: ai, assistant, chat
 ;;
-;; Usage:
-;;   (load-file "/path/to/nanoclaw/emacs/nanoclaw.el")
+;; Vanilla Emacs (init.el):
+;;   (load-file "~/src/nanoclaw/emacs/nanoclaw.el")
+;;   (global-set-key (kbd "C-c n c") #'nanoclaw-chat)
+;;   (global-set-key (kbd "C-c n o") #'nanoclaw-org-send)
+;;
+;; Spacemacs (~/.spacemacs, in dotspacemacs/user-config):
+;;   (load-file "~/src/nanoclaw/emacs/nanoclaw.el")
+;;   (spacemacs/set-leader-keys "aNc" #'nanoclaw-chat)
+;;   (spacemacs/set-leader-keys "aNo" #'nanoclaw-org-send)
 ;;
 ;; Doom Emacs (config.el):
-;;   (load! "path/to/nanoclaw/emacs/nanoclaw.el")
+;;   (load (expand-file-name "~/src/nanoclaw/emacs/nanoclaw.el"))
 ;;   (map! :leader
-;;         :desc "NanoClaw chat"  "a n c" #'nanoclaw-chat
-;;         :desc "NanoClaw org"   "a n o" #'nanoclaw-org-send)
+;;         :prefix ("N" . "NanoClaw")
+;;         :desc "Chat buffer" "c" #'nanoclaw-chat
+;;         :desc "Send org"    "o" #'nanoclaw-org-send)
 
 ;;; Code:
 

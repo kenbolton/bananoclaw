@@ -85,9 +85,11 @@ Tries pandoc -f gfm -t org when available; falls back to regex."
     (if (executable-find "pandoc")
         (with-temp-buffer
           (insert text)
-          (let ((exit (call-process-region
-                       (point-min) (point-max)
-                       "pandoc" t t nil "-f" "gfm" "-t" "org" "--wrap=none")))
+          (let* ((coding-system-for-read 'utf-8)
+                 (coding-system-for-write 'utf-8)
+                 (exit (call-process-region
+                        (point-min) (point-max)
+                        "pandoc" t t nil "-f" "gfm" "-t" "org" "--wrap=none")))
             (if (zerop exit)
                 (string-trim (buffer-string))
               text)))

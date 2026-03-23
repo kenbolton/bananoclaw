@@ -2,7 +2,7 @@ import fs from 'fs';
 import http from 'http';
 import path from 'path';
 
-import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
+import { GROUPS_DIR } from '../config.js';
 import { setRegisteredGroup } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
@@ -184,7 +184,6 @@ export class EmacsBridgeChannel implements Channel {
       folder: 'emacs',
       trigger: '',
       added_at: new Date().toISOString(),
-      agentName: ASSISTANT_NAME,
       requiresTrigger: false,
     };
 

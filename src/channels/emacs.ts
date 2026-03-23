@@ -34,6 +34,7 @@ export class EmacsBridgeChannel implements Channel {
   async connect(): Promise<void> {
     this.ensureGroupRegistered();
     this.ensureSymlink();
+    this.ensureClaudeMd();
 
     this.server = http.createServer((req, res) => {
       if (!this.checkAuth(req, res)) return;
@@ -141,6 +142,37 @@ export class EmacsBridgeChannel implements Channel {
     res
       .writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       .end(JSON.stringify({ messages }));
+  }
+
+  private ensureClaudeMd(): void {
+    const claudeMd = path.join(GROUPS_DIR, 'emacs', 'CLAUDE.md');
+    // groups/emacs symlinks to the main group folder on typical installs, so
+    // this is a no-op when that CLAUDE.md already exists. On a fresh setup it
+    // bootstraps the file so the agent knows to output markdown, not org-mode.
+    if (fs.existsSync(claudeMd)) return;
+    const content = [
+      '## Message Formatting',
+      '',
+      'This is an Emacs channel. Responses are automatically converted from markdown',
+      'to org-mode by the bridge before display.',
+      '',
+      '**Always format responses in standard markdown:**',
+      '- `**bold**` not `*bold*`',
+      '- `*italic*` not `/italic/`',
+      '- `~~strikethrough~~` not `+strikethrough+`',
+      '- `` `code` `` not `~code~`',
+      '- ` ```lang ` fenced code blocks',
+      '- `- ` for bullet points',
+      '',
+      'Do NOT output org-mode syntax directly. The bridge handles conversion.',
+      '',
+    ].join('\n');
+    try {
+      fs.writeFileSync(claudeMd, content, 'utf8');
+      logger.info('Emacs channel: wrote CLAUDE.md');
+    } catch (err) {
+      logger.warn({ err }, 'Emacs channel: could not write CLAUDE.md');
+    }
   }
 
   private ensureGroupRegistered(): void {

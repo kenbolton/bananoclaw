@@ -99,6 +99,10 @@ Tries pandoc -f gfm -t org when available; falls back to regex."
               text)))
       (nanoclaw--md-to-org-regex text))))
 
+;; NOTE: This function expects standard markdown as input (e.g. **bold**, *italic*).
+;; Agents responding on this channel must output markdown, not org-mode syntax.
+;; If the agent outputs org-mode directly, markers like *bold* will be incorrectly
+;; re-converted to /bold/ by the italic rule.
 (defun nanoclaw--md-to-org-regex (text)
   "Lightweight markdown → org conversion using regexp substitutions."
   (let ((s text))

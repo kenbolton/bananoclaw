@@ -236,6 +236,22 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 # systemctl --user start nanoclaw
 ```
 
+## Agent Formatting
+
+The Emacs bridge converts markdown → org-mode automatically. Agents should
+output standard markdown — **not** org-mode syntax. The conversion handles:
+
+| Markdown | Org-mode |
+|----------|----------|
+| `**bold**` | `*bold*` |
+| `*italic*` | `/italic/` |
+| `~~text~~` | `+text+` |
+| `` `code` `` | `~code~` |
+| ` ```lang ` | `#+begin_src lang` |
+
+If an agent outputs org-mode directly, bold/italic/etc. will be double-converted
+and render incorrectly.
+
 ## Removal
 
 To remove the Emacs channel:

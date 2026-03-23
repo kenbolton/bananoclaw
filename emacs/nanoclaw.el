@@ -427,7 +427,7 @@ If a region is active, send the region text instead."
                                 (org-next-visible-heading 1)
                                 (point))))
                     (delete-region beg end))
-                  (set-marker ph nil))))))))))
+                  (set-marker ph nil)))))))))))
 
 (defun nanoclaw--org-insert-placeholder (level)
   "Insert a processing child heading at LEVEL+1 and return a marker at its start."

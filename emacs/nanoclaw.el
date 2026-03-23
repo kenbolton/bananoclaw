@@ -263,7 +263,7 @@ for multi-line input; send with C-c C-c."
     (let* ((inhibit-read-only t)
            (is-agent (not (string= speaker "You")))
            (display-text (if is-agent (nanoclaw--to-org text) text))
-           (ts (and is-agent (nanoclaw--format-timestamp)))
+           (ts (nanoclaw--format-timestamp))
            (label (if ts (format "%s [%s]" speaker ts) speaker))
            (face  (if is-agent 'font-lock-string-face 'font-lock-keyword-face)))
       (goto-char (point-max))

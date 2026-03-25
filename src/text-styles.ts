@@ -96,9 +96,14 @@ export function parseSignalStyles(rawText: string): {
           const startOut = out.length;
           out += content;
           addStyle('MONOSPACE', startOut, out.length);
-          // Advance past \n``` + optional trailing newline
+          // Advance past \n``` and preserve the trailing newline in output
           const afterClose = s.indexOf('\n', closeAt + 4);
-          i = afterClose !== -1 ? afterClose + 1 : n;
+          if (afterClose !== -1) {
+            out += '\n';
+            i = afterClose + 1;
+          } else {
+            i = n;
+          }
           continue;
         }
       }
@@ -280,7 +285,9 @@ interface Segment {
  */
 function splitProtectedRegions(text: string): Segment[] {
   const segments: Segment[] = [];
-  const CODE_PATTERN = /```[\s\S]*?```|`[^`\n]+`/g;
+  // Fenced blocks must start at the beginning of a line (^ with m flag).
+  // Inline code is a single-line backtick span.
+  const CODE_PATTERN = /^```[^\n]*\n[\s\S]*?\n```$|`[^`\n]+`/gm;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -324,8 +331,12 @@ function transformSegment(text: string, channel: ChannelType): string {
 
   // 4. Links
   if (channel === 'slack') {
+    // Slack mrkdwn: <url|text>
     t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>');
+  } else if (channel === 'telegram') {
+    // Telegram Markdown v1 renders [text](url) natively — keep as-is.
   } else {
+    // WhatsApp and others: flatten to "text (url)" since they don't render links.
     t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
   }
 

@@ -336,15 +336,15 @@ describe('parseTextStyles — headings', () => {
 });
 
 describe('parseTextStyles — links', () => {
-  it('converts [text](url) to text (url) on whatsapp', () => {
+  it('flattens [text](url) to text (url) on whatsapp', () => {
     expect(parseTextStyles('[Link](https://example.com)', 'whatsapp')).toBe(
       'Link (https://example.com)',
     );
   });
 
-  it('converts [text](url) to text (url) on telegram', () => {
+  it('preserves [text](url) on telegram (Markdown v1 renders links natively)', () => {
     expect(parseTextStyles('[Link](https://example.com)', 'telegram')).toBe(
-      'Link (https://example.com)',
+      '[Link](https://example.com)',
     );
   });
 

@@ -259,14 +259,22 @@ describe('trigger gating (requiresTrigger interaction)', () => {
 // --- parseTextStyles ---
 
 describe('parseTextStyles — passthrough channels', () => {
+  const md = '**bold** and *italic* and [link](https://example.com)';
+
   it('passes text through unchanged on discord', () => {
-    const md = '**bold** and *italic* and [link](https://example.com)';
     expect(parseTextStyles(md, 'discord')).toBe(md);
   });
 
   it('passes text through unchanged on signal (signal uses parseSignalStyles)', () => {
-    const md = '**bold** and *italic* and [link](https://example.com)';
     expect(parseTextStyles(md, 'signal')).toBe(md);
+  });
+
+  it('passes text through unchanged on emacs (client handles conversion)', () => {
+    expect(parseTextStyles(md, 'emacs')).toBe(md);
+  });
+
+  it('passes text through unchanged for any unknown channel', () => {
+    expect(parseTextStyles(md, 'future-channel')).toBe(md);
   });
 });
 

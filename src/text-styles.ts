@@ -11,20 +11,19 @@
  * Code blocks (fenced and inline) are NEVER transformed by marker substitution.
  */
 
-export type ChannelType =
-  | 'signal'
-  | 'whatsapp'
-  | 'telegram'
-  | 'slack'
-  | 'discord';
+export type ChannelType = string;
+
+/** Channels that require Markdown marker substitution before delivery. */
+const SUBSTITUTION_CHANNELS = new Set(['whatsapp', 'telegram', 'slack']);
 
 /** Transform Markdown text for the target channel's native format. */
 export function parseTextStyles(text: string, channel: ChannelType): string {
   if (!text) return text;
 
-  // Discord and Signal are passthrough — no marker substitution.
-  // Discord is already Markdown; Signal uses parseSignalStyles() for rich text.
-  if (channel === 'discord' || channel === 'signal') return text;
+  // Only whatsapp, telegram, and slack need marker substitution.
+  // All other channels (discord, signal, emacs, gmail, …) are passthrough —
+  // either they render Markdown natively or handle conversion themselves.
+  if (!SUBSTITUTION_CHANNELS.has(channel)) return text;
 
   // Split into protected (code) and unprotected regions, transform only the latter.
   const segments = splitProtectedRegions(text);

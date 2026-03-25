@@ -17,6 +17,7 @@ description: Install the claw CLI tool — run NanoClaw agent containers from th
 - Auto-detects `container` or `docker` runtime (or override with `--runtime`)
 - Prints the agent's response to stdout; session ID to stderr
 - Verbose mode (`-v`) shows the command, redacted payload, and exit code
+- `claw ps` — list, inspect, and manage running NanoClaw containers
 
 ## Prerequisites
 
@@ -98,6 +99,31 @@ claw -v "Hello"
 
 # Custom timeout for long-running tasks
 claw --timeout 600 "Run the full analysis"
+```
+
+### Container management (claw ps)
+
+```bash
+# List all running NanoClaw containers
+claw ps
+
+# Filter by name substring
+claw ps main
+
+# Also show unnamed/zombie containers
+claw ps --all
+
+# Dump logs for all named containers
+claw ps --logs
+
+# Dump logs for containers matching "main"
+claw ps --logs main
+
+# Follow logs (multiplexed, Ctrl-C to stop)
+claw ps --tail
+
+# Remove stale unnamed containers
+claw ps --kill-zombies
 ```
 
 ## Troubleshooting

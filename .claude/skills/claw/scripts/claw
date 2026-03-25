@@ -12,6 +12,13 @@ Usage:
   claw --list-groups
   echo "prompt text" | claw --pipe -g <channel_name>
   cat prompt.txt | claw --pipe
+
+  claw ps                         List running NanoClaw containers
+  claw ps [filter]                Filter containers by name substring
+  claw ps --all                   Also show unnamed/zombie containers
+  claw ps --logs [filter]         Dump logs for matching containers
+  claw ps --tail [filter]         Follow logs (multiplexed, Ctrl-C to stop)
+  claw ps --kill-zombies          Stop and remove unnamed containers
 """
 
 from __future__ import annotations
@@ -219,9 +226,210 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
         sys.exit(proc.returncode)
 
 
+# ── Container listing (claw ps) ──────────────────────────────────────────────
+
+# Apple Container timestamps are seconds since 2001-01-01 (Core Data epoch).
+_APPLE_EPOCH_OFFSET = 978307200
+
+
+def human_age(secs: float) -> str:
+    secs = int(secs)
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        m, s = secs // 60, secs % 60
+        return f"{m}m {s:02d}s"
+    if secs < 86400:
+        h, m = secs // 3600, (secs % 3600) // 60
+        return f"{h}h {m:02d}m"
+    d, h = secs // 86400, (secs % 86400) // 3600
+    return f"{d}d {h:02d}h"
+
+
+def fetch_containers(runtime: str) -> list[dict]:
+    """Return normalized NanoClaw containers from the active runtime.
+
+    Each dict: id, state, age, named (bool).
+    """
+    import time
+
+    if runtime == "container":
+        result = subprocess.run(
+            ["container", "ls", "--format", "json"],
+            capture_output=True, text=True,
+        )
+        try:
+            data = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError:
+            return []
+        now = time.time()
+        containers = []
+        for c in data:
+            config = c.get("configuration") or {}
+            cid = config.get("id") or ""
+            image = (config.get("image") or {}).get("reference") or ""
+            state = c.get("status") or "?"
+            sd = c.get("startedDate")
+            try:
+                age = human_age(now - (float(sd) + _APPLE_EPOCH_OFFSET)) if sd is not None else "?"
+            except Exception:
+                age = "?"
+            if "nanoclaw-agent" not in image and not cid.startswith("nanoclaw-"):
+                continue
+            containers.append({"id": cid, "state": state, "age": age,
+                                "named": cid.startswith("nanoclaw-")})
+        return containers
+    else:
+        # Docker returns NDJSON (one JSON object per line)
+        result = subprocess.run(
+            ["docker", "ps", "--filter", "name=nanoclaw-", "--format", "json"],
+            capture_output=True, text=True,
+        )
+        containers = []
+        for line in (result.stdout or "").splitlines():
+            if not line.strip():
+                continue
+            try:
+                c = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            cid = c.get("Names") or c.get("ID") or ""
+            image = c.get("Image") or ""
+            s = (c.get("State") or c.get("Status") or "?").lower()
+            state = "running" if "running" in s else s
+            age = (c.get("RunningFor") or "?")
+            if age.endswith(" ago"):
+                age = age[:-4]
+            if "nanoclaw-agent" not in image and not cid.startswith("nanoclaw-"):
+                continue
+            containers.append({"id": cid, "state": state, "age": age,
+                                "named": cid.startswith("nanoclaw-")})
+        return containers
+
+
+def _rt_cmd(runtime: str) -> str:
+    return "container" if runtime == "container" else "docker"
+
+
+def cmd_ps(ps_args, runtime: str) -> None:
+    containers = fetch_containers(runtime)
+    filt = ps_args.filter or ""
+    named = [c for c in containers if c["named"]]
+    unnamed = [c for c in containers if not c["named"]]
+
+    if ps_args.logs:
+        matches = [c for c in named if not filt or filt in c["id"]]
+        if not matches:
+            print("No matching containers.")
+            return
+        for c in matches:
+            print(f"=== {c['id']} ===")
+            subprocess.run([_rt_cmd(runtime), "logs", c["id"]], stderr=subprocess.STDOUT)
+            print()
+        return
+
+    if ps_args.tail:
+        matches = [c for c in named if not filt or filt in c["id"]]
+        if not matches:
+            print("No matching containers.")
+            return
+        procs = []
+        for c in matches:
+            label = c["id"].removeprefix("nanoclaw-")
+            proc = subprocess.Popen(
+                [_rt_cmd(runtime), "logs", "-f", c["id"]],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            procs.append(proc)
+
+            def _stream(p=proc, lbl=label):
+                for raw in p.stdout:
+                    print(f"[{lbl}] {raw.decode(errors='replace').rstrip()}")
+
+            threading.Thread(target=_stream, daemon=True).start()
+        try:
+            for p in procs:
+                p.wait()
+        except KeyboardInterrupt:
+            for p in procs:
+                try:
+                    p.terminate()
+                except ProcessLookupError:
+                    pass
+        return
+
+    if ps_args.kill_zombies:
+        if not unnamed:
+            print("No zombie containers to remove.")
+            return
+        log_path = NANOCLAW_DIR / "logs" / "nanoclaw.log"
+        count = 0
+        for c in unnamed:
+            cid = c["id"]
+            print(f"Stopping {cid}...")
+            subprocess.run([_rt_cmd(runtime), "stop", cid], capture_output=True)
+            subprocess.run([_rt_cmd(runtime), "rm",   cid], capture_output=True)
+            count += 1
+            try:
+                from datetime import datetime
+                ts = datetime.now().strftime("%H:%M:%S.000")
+                with open(log_path, "a") as f:
+                    f.write(f"[{ts}] INFO (claw ps): Removed zombie container {cid}\n")
+            except OSError:
+                pass
+        print(f"Removed {count} zombie container(s).")
+        return
+
+    # Default: list named containers
+    visible = [c for c in named if not filt or filt in c["id"]]
+    if visible:
+        print(f"{'CONTAINER':<56} {'STATUS':<10} AGE")
+        print("-" * 78)
+        for c in sorted(visible, key=lambda x: x["id"]):
+            print(f"{c['id']:<56} {c['state']:<10} {c['age']}")
+    elif filt:
+        print(f'No containers matching "{filt}".')
+    else:
+        print("No named NanoClaw containers running.")
+
+    if unnamed:
+        n = len(unnamed)
+        print(f"\nZombies: {n} unnamed container(s)  [use --all to list, --kill-zombies to remove]")
+        if ps_args.all:
+            for c in unnamed:
+                print(f"  {c['id']}  {c['state']}  {c['age']}")
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
+    global VERBOSE
+
+    # ── claw ps subcommand ────────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "ps":
+        ps_parser = argparse.ArgumentParser(
+            prog="claw ps",
+            description="List and manage running NanoClaw containers.",
+        )
+        ps_parser.add_argument("filter", nargs="?", help="Substring filter for container names")
+        ps_parser.add_argument("--all", action="store_true",
+                               help="Show unnamed/zombie containers in the listing")
+        ps_parser.add_argument("--logs", action="store_true",
+                               help="Dump logs for matching containers")
+        ps_parser.add_argument("--tail", action="store_true",
+                               help="Follow logs (multiplexed with [label] prefix, Ctrl-C to stop)")
+        ps_parser.add_argument("--kill-zombies", dest="kill_zombies", action="store_true",
+                               help="Stop and remove unnamed nanoclaw-agent containers")
+        ps_parser.add_argument("--runtime", choices=["docker", "container"],
+                               help="Container runtime (default: auto-detect)")
+        ps_parser.add_argument("-v", "--verbose", action="store_true")
+        ps_args = ps_parser.parse_args(sys.argv[2:])
+        VERBOSE = ps_args.verbose
+        runtime = detect_runtime(ps_args.runtime)
+        cmd_ps(ps_args, runtime)
+        return
+
     parser = argparse.ArgumentParser(
         prog="claw",
         description="Run a NanoClaw agent from the command line.",
@@ -243,7 +451,6 @@ def main():
                         help="Show debug info: cmd, payload (secrets redacted), stdout lines, exit code")
     args = parser.parse_args()
 
-    global VERBOSE
     VERBOSE = args.verbose
 
     groups = get_groups(DB_PATH) if DB_PATH.exists() else []

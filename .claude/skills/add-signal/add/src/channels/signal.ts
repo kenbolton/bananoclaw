@@ -12,6 +12,205 @@ import {
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
+// ---------------------------------------------------------------------------
+// Signal rich-text types and parser (self-contained — no dependency on the
+// channel-formatting skill or text-styles.ts)
+// ---------------------------------------------------------------------------
+
+interface SignalTextStyle {
+  style: 'BOLD' | 'ITALIC' | 'STRIKETHROUGH' | 'MONOSPACE' | 'SPOILER';
+  /** Start position in the final string, in UTF-16 code units. */
+  start: number;
+  /** Length of the styled range, in UTF-16 code units. */
+  length: number;
+}
+
+/**
+ * Strip Claude's Markdown markers and return plain text + Signal style ranges.
+ * Handles **bold**, *italic*, _italic_, ~~strike~~, `code`, ```blocks```,
+ * ## headings (→ BOLD), [text](url) (→ "text (url)"), and --- (removed).
+ */
+function parseSignalStyles(rawText: string): {
+  text: string;
+  textStyle: SignalTextStyle[];
+} {
+  const textStyle: SignalTextStyle[] = [];
+  let out = '';
+  let i = 0;
+  const s = rawText;
+  const n = s.length;
+
+  function addStyle(
+    style: SignalTextStyle['style'],
+    startOut: number,
+    endOut: number,
+  ): void {
+    const length = endOut - startOut;
+    if (length > 0) textStyle.push({ style, start: startOut, length });
+  }
+
+  while (i < n) {
+    // Fenced code block  ```[lang]\n...\n```
+    if (s[i] === '`' && s[i + 1] === '`' && s[i + 2] === '`') {
+      const langNl = s.indexOf('\n', i + 3);
+      if (langNl !== -1) {
+        const closeAt = s.indexOf('\n```', langNl);
+        if (closeAt !== -1) {
+          const content = s.slice(langNl + 1, closeAt);
+          const startOut = out.length;
+          out += content;
+          addStyle('MONOSPACE', startOut, out.length);
+          const afterClose = s.indexOf('\n', closeAt + 4);
+          if (afterClose !== -1) {
+            out += '\n';
+            i = afterClose + 1;
+          } else {
+            i = n;
+          }
+          continue;
+        }
+      }
+      out += s[i++];
+      continue;
+    }
+
+    // Inline code  `text`
+    if (s[i] === '`') {
+      const end = s.indexOf('`', i + 1);
+      const nl = s.indexOf('\n', i + 1);
+      if (end !== -1 && (nl === -1 || end < nl)) {
+        const startOut = out.length;
+        out += s.slice(i + 1, end);
+        addStyle('MONOSPACE', startOut, out.length);
+        i = end + 1;
+        continue;
+      }
+    }
+
+    // Bold  **text**
+    if (s[i] === '*' && s[i + 1] === '*' && s[i + 2] && s[i + 2] !== ' ') {
+      const end = s.indexOf('**', i + 2);
+      if (end !== -1 && s[end - 1] !== ' ') {
+        const startOut = out.length;
+        out += s.slice(i + 2, end);
+        addStyle('BOLD', startOut, out.length);
+        i = end + 2;
+        continue;
+      }
+    }
+
+    // Strikethrough  ~~text~~
+    if (s[i] === '~' && s[i + 1] === '~' && s[i + 2] && s[i + 2] !== ' ') {
+      const end = s.indexOf('~~', i + 2);
+      if (end !== -1) {
+        const startOut = out.length;
+        out += s.slice(i + 2, end);
+        addStyle('STRIKETHROUGH', startOut, out.length);
+        i = end + 2;
+        continue;
+      }
+    }
+
+    // Italic  *text*
+    if (s[i] === '*' && s[i + 1] !== '*' && s[i + 1] !== ' ' && s[i + 1]) {
+      const end = findClosingStar(s, i + 1);
+      if (end !== -1) {
+        const startOut = out.length;
+        out += s.slice(i + 1, end);
+        addStyle('ITALIC', startOut, out.length);
+        i = end + 1;
+        continue;
+      }
+    }
+
+    // Italic  _text_  (word boundaries only — guards snake_case)
+    if (s[i] === '_' && s[i + 1] !== '_' && s[i + 1] !== ' ' && s[i + 1]) {
+      const prevChar = i > 0 ? s[i - 1] : '';
+      if (!/\w/.test(prevChar)) {
+        const end = findClosingUnderscore(s, i + 1);
+        if (end !== -1) {
+          const startOut = out.length;
+          out += s.slice(i + 1, end);
+          addStyle('ITALIC', startOut, out.length);
+          i = end + 1;
+          continue;
+        }
+      }
+    }
+
+    // ATX Heading  ## text → BOLD
+    if ((i === 0 || s[i - 1] === '\n') && s[i] === '#') {
+      let j = i;
+      while (j < n && s[j] === '#') j++;
+      if (j < n && s[j] === ' ') {
+        const lineEnd = s.indexOf('\n', j + 1);
+        const headingText =
+          lineEnd !== -1 ? s.slice(j + 1, lineEnd) : s.slice(j + 1);
+        const startOut = out.length;
+        out += headingText;
+        addStyle('BOLD', startOut, out.length);
+        if (lineEnd !== -1) {
+          out += '\n';
+          i = lineEnd + 1;
+        } else {
+          i = n;
+        }
+        continue;
+      }
+    }
+
+    // Links  [text](url) → text (url)
+    if (s[i] === '[') {
+      const closeBracket = s.indexOf(']', i + 1);
+      if (closeBracket !== -1 && s[closeBracket + 1] === '(') {
+        const closeParen = s.indexOf(')', closeBracket + 2);
+        if (closeParen !== -1) {
+          out += `${s.slice(i + 1, closeBracket)} (${s.slice(closeBracket + 2, closeParen)})`;
+          i = closeParen + 1;
+          continue;
+        }
+      }
+    }
+
+    // Horizontal rule  --- / *** / ___
+    if (i === 0 || s[i - 1] === '\n') {
+      const hrMatch = /^(-{3,}|\*{3,}|_{3,}) *(\n|$)/.exec(s.slice(i));
+      if (hrMatch) {
+        i += hrMatch[0].length;
+        continue;
+      }
+    }
+
+    // Default: copy character, preserving surrogate pairs
+    const code = s.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < n) {
+      out += s[i] + s[i + 1];
+      i += 2;
+    } else {
+      out += s[i++];
+    }
+  }
+
+  return { text: out, textStyle };
+}
+
+function findClosingStar(s: string, from: number): number {
+  for (let i = from; i < s.length; i++) {
+    if (s[i] === '\n') return -1;
+    if (s[i] === '*' && s[i + 1] !== '*' && s[i - 1] !== ' ') return i;
+  }
+  return -1;
+}
+
+function findClosingUnderscore(s: string, from: number): number {
+  for (let i = from; i < s.length; i++) {
+    if (s[i] === '\n') return -1;
+    if (s[i] === '_' && s[i + 1] !== '_' && !/\w/.test(s[i + 1] ?? ''))
+      return i;
+  }
+  return -1;
+}
+
 interface JsonRpcNotification {
   jsonrpc: '2.0';
   method: string;
@@ -153,28 +352,63 @@ export class SignalChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    const prefixed = `${ASSISTANT_NAME}: ${text}`;
+    const prefix = `${ASSISTANT_NAME}: `;
+    const { text: cleanText, textStyle } = parseSignalStyles(text);
+    const prefixed = prefix + cleanText;
+
+    // Shift style ranges to account for the "Name: " prefix.
+    // Prefix is ASCII so prefix.length === its UTF-16 code unit count.
+    const prefixLen = prefix.length;
+    const offsetStyles: SignalTextStyle[] = textStyle.map((s) => ({
+      ...s,
+      start: s.start + prefixLen,
+    }));
+
+    const extra = jid.startsWith('signal:group:')
+      ? { groupId: jid.slice('signal:group:'.length) }
+      : { recipient: [jid.slice('signal:'.length)] };
+
+    const baseParams: Record<string, unknown> = {
+      account: this.accountNumber,
+      message: prefixed,
+      ...extra,
+    };
+    if (offsetStyles.length > 0) {
+      // signal-cli JSON-RPC expects "textStyles" (plural) as "start:length:STYLE" strings.
+      baseParams.textStyles = offsetStyles.map(
+        (s) => `${s.start}:${s.length}:${s.style}`,
+      );
+    }
 
     let result: { timestamp?: number } | null = null;
-    if (jid.startsWith('signal:group:')) {
-      const groupId = jid.slice('signal:group:'.length);
-      result = (await this.rpcCall('send', {
-        account: this.accountNumber,
-        groupId,
-        message: prefixed,
-      })) as { timestamp?: number } | null;
-    } else {
-      const recipient = jid.slice('signal:'.length);
-      result = (await this.rpcCall('send', {
-        account: this.accountNumber,
-        recipient: [recipient],
-        message: prefixed,
-      })) as { timestamp?: number } | null;
+    try {
+      result = (await this.rpcCall('send', baseParams)) as {
+        timestamp?: number;
+      } | null;
+    } catch (err) {
+      if (offsetStyles.length > 0) {
+        // signal-cli rejected textStyles — retry as plain text.
+        logger.warn(
+          { jid, err },
+          'Signal send with textStyles failed, retrying without',
+        );
+        result = (await this.rpcCall('send', {
+          account: this.accountNumber,
+          message: prefixed,
+          ...extra,
+        })) as { timestamp?: number } | null;
+      } else {
+        throw err;
+      }
     }
+
     if (result?.timestamp) {
       this.lastSentTimestamps.set(jid, result.timestamp);
     }
-    logger.info({ jid, length: prefixed.length }, 'Signal message sent');
+    logger.info(
+      { jid, length: prefixed.length, styles: offsetStyles.length },
+      'Signal message sent',
+    );
   }
 
   async editMessage(
@@ -187,11 +421,24 @@ export class SignalChannel implements Channel {
       throw new Error('No message to edit — no stored timestamp for this chat');
     }
 
+    const prefix = `${ASSISTANT_NAME}: `;
+    const { text: cleanText, textStyle } = parseSignalStyles(newText);
+    const prefixLen = prefix.length;
+    const offsetStyles: SignalTextStyle[] = textStyle.map((s) => ({
+      ...s,
+      start: s.start + prefixLen,
+    }));
+
     const params: Record<string, unknown> = {
       account: this.accountNumber,
-      message: `${ASSISTANT_NAME}: ${newText}`,
+      message: prefix + cleanText,
       editTimestamp,
     };
+    if (offsetStyles.length > 0) {
+      params.textStyles = offsetStyles.map(
+        (s) => `${s.start}:${s.length}:${s.style}`,
+      );
+    }
 
     if (jid.startsWith('signal:group:')) {
       params.groupId = jid.slice('signal:group:'.length);

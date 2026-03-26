@@ -235,7 +235,9 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
         # No structured output — print raw stdout
         print(stdout)
 
-    if proc.returncode not in (0, None):
+    # If we killed the container ourselves (sentinel found), a non-zero returncode
+    # is expected (SIGKILL → -9 on Linux) and should not propagate as failure.
+    if proc.returncode not in (0, None) and not done.is_set():
         sys.exit(proc.returncode)
 
 

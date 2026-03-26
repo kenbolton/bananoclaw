@@ -17,9 +17,12 @@ description: Install the claw CLI tool — run NanoClaw agent containers from th
 - Auto-detects `container` or `docker` runtime (or override with `--runtime`)
 - Prints the agent's response to stdout; session ID to stderr
 - Verbose mode (`-v`) shows the command, redacted payload, and exit code
-- `claw ps` — list, inspect, and manage running NanoClaw containers
+- `claw -f tasks.txt` — read prompt from a file (alternative to `--pipe`)
+- `claw ps` — list, inspect, manage, and restart running NanoClaw containers
 - `claw sessions` — list groups with a saved session ID (for use with `-s`)
 - `claw history` — print recent messages for a group from the local database
+- `claw watch` — tail a group's conversation in real time from the DB
+- `claw groups` — list, add, and remove registered groups from the CLI
 - `claw rebuild` — build (or rebuild) the `nanoclaw-agent` container image
 - `claw molt` — export/import NanoClaw installs via the [molt](https://github.com/kenbolton/molt) migration tool (optional dependency)
 
@@ -103,6 +106,12 @@ claw -v "Hello"
 
 # Custom timeout for long-running tasks
 claw --timeout 600 "Run the full analysis"
+
+# Read prompt from a file
+claw -f tasks.txt
+
+# Prefix the file contents with an inline instruction
+claw "Summarize this:" -f report.txt
 ```
 
 ### Container management (claw ps)
@@ -128,6 +137,9 @@ claw ps --tail
 
 # Remove stale unnamed containers
 claw ps --kill-zombies
+
+# Stop and remove a specific stuck container (NanoClaw may re-process the pending message)
+claw ps --restart main
 ```
 
 ### Session management (claw sessions)
@@ -160,6 +172,38 @@ claw history -n 50
 
 # By exact JID
 claw history -j "120363336345536173@g.us"
+```
+
+### Live message tail (claw watch)
+
+```bash
+# Watch the main group in real time (Ctrl-C to stop)
+claw watch
+
+# Watch a specific group
+claw watch -g family
+
+# Faster poll interval (default is 2s)
+claw watch -n 1
+```
+
+### Group management (claw groups)
+
+```bash
+# List registered groups
+claw groups
+
+# Register a new group
+claw groups add "120363336345536173@g.us" --name "My Group"
+
+# Register with a custom folder and agent name
+claw groups add "120363336345536173@g.us" --name "My Group" --folder my-group --agent-name "Andy"
+
+# Mark as the main group
+claw groups add "120363336345536173@g.us" --name "My Group" --main
+
+# Remove a group (prompts for confirmation; group folder on disk is preserved)
+claw groups remove "My Group"
 ```
 
 ### Rebuilding the container image (claw rebuild)

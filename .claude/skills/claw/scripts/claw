@@ -12,14 +12,20 @@ Usage:
   claw --list-groups
   echo "prompt text" | claw --pipe -g <channel_name>
   cat prompt.txt | claw --pipe
+  claw -f tasks.txt               Read prompt from a file
   claw ps                         List running NanoClaw containers
   claw ps [filter]                Filter containers by name substring
   claw ps --all                   Also show unnamed/zombie containers
   claw ps --logs [filter]         Dump logs for matching containers
   claw ps --tail [filter]         Follow logs (multiplexed, Ctrl-C to stop)
   claw ps --kill-zombies          Stop and remove unnamed containers
+  claw ps --restart <name>        Stop and remove a specific named container
   claw sessions [filter]          List groups with a saved session ID
   claw history [-g group] [-n N]  Print recent messages for a group
+  claw watch [-g group]           Poll DB for new messages in real time
+  claw groups                     List registered groups
+  claw groups add <jid> --name .. Register a new group
+  claw groups remove <name>       Unregister a group
   claw rebuild [--tag TAG]        Build the nanoclaw-agent container image
   claw molt export [--out <file.molt>]         Export this install to a bundle
   claw molt import <file.molt> [--rename k=v]  Import bundle into this install
@@ -301,6 +307,159 @@ def cmd_molt(molt_args: list[str]) -> None:
     sys.exit(result.returncode)
 
 
+# ── Message watcher (claw watch) ─────────────────────────────────────────────
+
+_GROUP_FOLDER_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+
+
+def cmd_watch(group: str | None, jid: str | None, interval: float) -> None:
+    """Poll the database for new messages and print them as they arrive."""
+    if not DB_PATH.exists():
+        sys.exit(f"error: database not found at {DB_PATH}")
+    groups = get_groups(DB_PATH)
+    agent_name = "Agent"
+
+    if group:
+        g = find_group(groups, group)
+        if g is None:
+            sys.exit(f"error: group '{group}' not found. Run --list-groups to see options.")
+        target_jid = g["jid"]
+        label = g["name"]
+        agent_name = g.get("agent_name") or "Agent"
+    elif jid:
+        target_jid = jid
+        label = jid
+    else:
+        mains = [g for g in groups if g["is_main"]]
+        if not mains:
+            sys.exit("error: no main group found. Use -g or -j.")
+        target_jid = mains[0]["jid"]
+        label = mains[0]["name"]
+        agent_name = mains[0].get("agent_name") or "Agent"
+
+    print(f"Watching {label} (Ctrl-C to stop)...", file=sys.stderr)
+    last_ts = datetime.utcnow().isoformat() + "Z"
+    try:
+        while True:
+            conn = sqlite3.connect(DB_PATH)
+            rows = conn.execute(
+                """
+                SELECT sender_name, content, timestamp, is_from_me, is_bot_message
+                FROM messages
+                WHERE chat_jid = ? AND timestamp > ?
+                ORDER BY timestamp ASC
+                """,
+                (target_jid, last_ts),
+            ).fetchall()
+            conn.close()
+            for sender_name, content, ts, is_from_me, is_bot in rows:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    ts_str = dt.strftime("%H:%M:%S")
+                except Exception:
+                    ts_str = (ts or "")[:8]
+                if is_bot:
+                    who = agent_name
+                elif is_from_me:
+                    who = sender_name or "You"
+                else:
+                    who = sender_name or "?"
+                display = (content or "").replace("\n", " ")
+                if len(display) > 120:
+                    display = display[:117] + "..."
+                print(f"[{ts_str}] {who}: {display}")
+                last_ts = ts
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        pass
+
+
+# ── Group management (claw groups) ───────────────────────────────────────────
+
+
+def _derive_folder(name: str) -> str:
+    """Derive a valid group folder name from a display name."""
+    folder = re.sub(r'[^a-z0-9_-]', '', name.lower().replace(' ', '-'))
+    folder = folder.lstrip('-_')[:64]
+    return folder
+
+
+def _validate_folder(folder: str) -> str | None:
+    """Return an error message if folder is invalid, else None."""
+    if not _GROUP_FOLDER_PATTERN.match(folder):
+        return f"invalid folder '{folder}': must match [A-Za-z0-9][A-Za-z0-9_-]{{0,63}}"
+    if folder.lower() == "global":
+        return "folder name 'global' is reserved"
+    return None
+
+
+def cmd_groups(subcmd: str | None, args) -> None:
+    """List, add, or remove registered groups."""
+    if not DB_PATH.exists():
+        sys.exit(f"error: database not found at {DB_PATH}")
+
+    if subcmd is None or subcmd == "list":
+        groups = get_groups(DB_PATH)
+        if not groups:
+            print("No groups registered.")
+            return
+        print(f"{'NAME':<35} {'FOLDER':<30} {'JID'}")
+        print("-" * 100)
+        for g in groups:
+            tag = " [main]" if g["is_main"] else ""
+            print(f"{g['name']:<35} {g['folder']:<30} {g['jid']}{tag}")
+        return
+
+    if subcmd == "add":
+        folder = args.folder or _derive_folder(args.name)
+        if err := _validate_folder(folder):
+            sys.exit(f"error: {err}")
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO registered_groups
+              (jid, name, folder, trigger_pattern, added_at, agent_name, requires_trigger, is_main)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                args.jid,
+                args.name,
+                folder,
+                args.trigger,
+                datetime.utcnow().isoformat() + "Z",
+                args.agent_name or None,
+                0,          # requires_trigger=0: respond to all messages
+                1 if args.main else 0,
+            ),
+        )
+        conn.commit()
+        conn.close()
+        logs_dir = NANOCLAW_DIR / "groups" / folder / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Registered '{args.name}' → folder: {folder}")
+        if args.main:
+            print("  (marked as main group)")
+        return
+
+    if subcmd == "remove":
+        groups = get_groups(DB_PATH)
+        g = find_group(groups, args.name)
+        if g is None:
+            sys.exit(f"error: group '{args.name}' not found.")
+        answer = input(f"Remove '{g['name']}' ({g['folder']})? [y/N] ").strip().lower()
+        if answer != "y":
+            print("Cancelled.")
+            return
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM registered_groups WHERE jid = ?", (g["jid"],))
+        conn.commit()
+        conn.close()
+        print(f"Removed '{g['name']}'. Group folder {NANOCLAW_DIR / 'groups' / g['folder']} was not deleted.")
+        return
+
+    sys.exit(f"error: unknown groups subcommand '{subcmd}'. Use: list, add, remove")
+
+
 # ── Session listing (claw sessions) ─────────────────────────────────────────
 
 
@@ -541,6 +700,25 @@ def cmd_ps(ps_args: argparse.Namespace, runtime: str) -> None:
                     pass
         return
 
+    if ps_args.restart:
+        name = ps_args.restart
+        matches = [c for c in named if name in c["id"]]
+        if not matches:
+            print(f'No running container matching "{name}".')
+            return
+        if len(matches) > 1:
+            names = ", ".join(c["id"] for c in matches)
+            sys.exit(f"error: ambiguous match '{name}'. Matches: {names}")
+        cid = matches[0]["id"]
+        print(f"Stopping {cid}...")
+        subprocess.run([runtime, "stop", cid], capture_output=True)
+        rm = subprocess.run([runtime, "rm", cid], capture_output=True)
+        if rm.returncode == 0:
+            print(f"Removed {cid}.")
+        else:
+            print(f"warning: stop succeeded but rm failed for {cid}", file=sys.stderr)
+        return
+
     if ps_args.kill_zombies:
         if not unnamed:
             print("No zombie containers to remove.")
@@ -616,6 +794,46 @@ def main():
         cmd_history(hist_args.group, hist_args.jid, hist_args.count)
         return
 
+    # ── claw watch subcommand ─────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "watch":
+        watch_parser = argparse.ArgumentParser(
+            prog="claw watch",
+            description="Poll the database for new messages and print them as they arrive.",
+        )
+        watch_parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
+        watch_parser.add_argument("-j", "--jid", help="Chat JID (exact)")
+        watch_parser.add_argument("-n", "--interval", type=float, default=2.0, metavar="SECS",
+                                  help="Poll interval in seconds (default: 2)")
+        watch_args = watch_parser.parse_args(sys.argv[2:])
+        cmd_watch(watch_args.group, watch_args.jid, watch_args.interval)
+        return
+
+    # ── claw groups subcommand ────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "groups":
+        groups_parser = argparse.ArgumentParser(
+            prog="claw groups",
+            description="List, add, or remove registered groups.",
+        )
+        groups_sub = groups_parser.add_subparsers(dest="subcmd")
+
+        groups_sub.add_parser("list", help="List registered groups (default)")
+
+        add_p = groups_sub.add_parser("add", help="Register a new group")
+        add_p.add_argument("jid", help="Chat JID (e.g. 120363...@g.us)")
+        add_p.add_argument("--name", required=True, help="Display name")
+        add_p.add_argument("--folder", help="Folder name (default: derived from --name)")
+        add_p.add_argument("--trigger", default=".*",
+                           help="Trigger regex (default: .* — respond to all messages)")
+        add_p.add_argument("--agent-name", dest="agent_name", help="Agent display name")
+        add_p.add_argument("--main", action="store_true", help="Mark as the main group")
+
+        rm_p = groups_sub.add_parser("remove", help="Unregister a group")
+        rm_p.add_argument("name", help="Group name or folder (fuzzy match)")
+
+        groups_args = groups_parser.parse_args(sys.argv[2:])
+        cmd_groups(groups_args.subcmd, groups_args)
+        return
+
     # ── claw rebuild subcommand ───────────────────────────────────────────────
     if len(sys.argv) > 1 and sys.argv[1] == "rebuild":
         rb_parser = argparse.ArgumentParser(
@@ -648,6 +866,8 @@ def main():
                           help="Follow logs, multiplexed with [label] prefix (ignores --all; Ctrl-C to stop)")
         mode.add_argument("--kill-zombies", dest="kill_zombies", action="store_true",
                           help="Stop and remove unnamed nanoclaw-agent containers")
+        mode.add_argument("--restart", metavar="NAME",
+                          help="Stop and remove a specific named container by name substring")
         ps_parser.add_argument("--runtime", choices=["docker", "container"],
                                help="Container runtime (default: auto-detect)")
         ps_parser.add_argument("-v", "--verbose", action="store_true")
@@ -661,8 +881,10 @@ def main():
         prog="claw",
         description="Run a NanoClaw agent from the command line.",
         epilog=(
-            "Container management: run 'claw ps --help' for listing, logs, and zombie cleanup.\n"
-            "Session history: 'claw sessions' lists saved session IDs; 'claw history' shows recent messages.\n"
+            "File input: use -f tasks.txt to read a prompt from a file.\n"
+            "Container management: 'claw ps --help' for listing, logs, restart, and zombie cleanup.\n"
+            "Session history: 'claw sessions'; recent messages: 'claw history'; live tail: 'claw watch'.\n"
+            "Group management: 'claw groups', 'claw groups add', 'claw groups remove'.\n"
             "Rebuild image: 'claw rebuild --help'.\n"
             "Migration: 'claw molt --help' for export/import with the molt tool."
         ),
@@ -671,6 +893,8 @@ def main():
     parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
     parser.add_argument("-j", "--jid", help="Chat JID (exact)")
     parser.add_argument("-s", "--session", help="Session ID to resume")
+    parser.add_argument("-f", "--file", metavar="PATH",
+                        help="Read prompt from a file (can be combined with a prompt arg as prefix)")
     parser.add_argument("-p", "--pipe", action="store_true",
                         help="Read prompt from stdin (can be combined with a prompt arg as prefix)")
     parser.add_argument("--runtime", choices=["docker", "container"],
@@ -696,8 +920,14 @@ def main():
             print(f"{g['name']:<35} {g['folder']:<30} {g['jid']}{main_tag}")
         return
 
-    # Resolve prompt: --pipe reads stdin, optionally prepended with positional arg
-    if args.pipe or (not sys.stdin.isatty() and not args.prompt):
+    # Resolve prompt: --file or --pipe reads external content, optionally prepended with positional arg
+    if args.file:
+        file_path = Path(args.file).expanduser()
+        if not file_path.exists():
+            sys.exit(f"error: file not found: {args.file}")
+        file_text = file_path.read_text().strip()
+        prompt = f"{args.prompt}\n\n{file_text}" if args.prompt else file_text
+    elif args.pipe or (not sys.stdin.isatty() and not args.prompt):
         stdin_text = sys.stdin.read().strip()
         if args.prompt:
             prompt = f"{args.prompt}\n\n{stdin_text}"

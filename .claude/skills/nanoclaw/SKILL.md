@@ -1,30 +1,30 @@
 ---
-name: claw
-description: Install the claw CLI tool — send prompts to NanoClaw agents (`claw agent`) and manage your install from the command line.
+name: nanoclaw
+description: Install the nanoclaw CLI tool — send prompts to NanoClaw agents (`nanoclaw agent`) and manage your install from the command line.
 ---
 
-# claw — NanoClaw CLI
+# nanoclaw — NanoClaw CLI
 
-`claw` is a Python CLI that sends prompts directly to a NanoClaw agent container from the terminal. It reads registered groups from the NanoClaw database, picks up secrets from `.env`, and pipes a JSON payload into a container run — no chat app required.
+`nanoclaw` is a Python CLI that sends prompts directly to a NanoClaw agent container from the terminal. It reads registered groups from the NanoClaw database, picks up secrets from `.env`, and pipes a JSON payload into a container run — no chat app required.
 
 ## What it does
 
-- `claw agent "…"` — send a prompt to any registered group (canonical form; `claw "…"` also works)
+- `nanoclaw agent "…"` — send a prompt to any registered group (canonical form; `nanoclaw "…"` also works)
 - Default target is the main group (no `-g` needed for most use)
 - Resume a previous session with `-s <session-id>`
 - Read prompts from stdin (`--pipe`) for scripting and piping
-- List all registered groups with `claw agent --list-groups`
+- List all registered groups with `nanoclaw agent --list-groups`
 - Auto-detects `container` or `docker` runtime (or override with `--runtime`)
 - Prints the agent's response to stdout; session ID to stderr
 - Verbose mode (`-v`) shows the command, redacted payload, and exit code
-- `claw agent -f tasks.txt` — read prompt from a file (alternative to `--pipe`)
-- `claw ps` — list, inspect, manage, and restart running NanoClaw containers
-- `claw sessions` — list groups with a saved session ID (for use with `-s`)
-- `claw history` — print recent messages for a group from the local database
-- `claw watch` — tail a group's conversation in real time from the DB
-- `claw groups` — list, add, and remove registered groups from the CLI
-- `claw rebuild` — build (or rebuild) the `nanoclaw-agent` container image
-- `claw molt` — export/import NanoClaw installs via the [molt](https://github.com/kenbolton/molt) migration tool (optional dependency)
+- `nanoclaw agent -f tasks.txt` — read prompt from a file (alternative to `--pipe`)
+- `nanoclaw ps` — list, inspect, manage, and restart running NanoClaw containers
+- `nanoclaw sessions` — list groups with a saved session ID (for use with `-s`)
+- `nanoclaw history` — print recent messages for a group from the local database
+- `nanoclaw watch` — tail a group's conversation in real time from the DB
+- `nanoclaw groups` — list, add, and remove registered groups from the CLI
+- `nanoclaw rebuild` — build (or rebuild) the `nanoclaw-agent` container image
+- `nanoclaw molt` — export/import NanoClaw installs via the [molt](https://github.com/kenbolton/molt) migration tool (optional dependency)
 
 ## Prerequisites
 
@@ -40,15 +40,15 @@ Run this skill from within the NanoClaw directory. The script auto-detects its l
 
 ```bash
 mkdir -p scripts
-cp "${CLAUDE_SKILL_DIR}/scripts/claw" scripts/claw
-chmod +x scripts/claw
+cp "${CLAUDE_SKILL_DIR}/scripts/nanoclaw" scripts/nanoclaw
+chmod +x scripts/nanoclaw
 ```
 
 ### 2. Symlink into PATH
 
 ```bash
 mkdir -p ~/bin
-ln -sf "$(pwd)/scripts/claw" ~/bin/claw
+ln -sf "$(pwd)/scripts/nanoclaw" ~/bin/nanoclaw
 ```
 
 Make sure `~/bin` is in `PATH`. Add this to `~/.zshrc` or `~/.bashrc` if needed:
@@ -66,7 +66,7 @@ source ~/.zshrc   # or ~/.bashrc
 ### 3. Verify
 
 ```bash
-claw groups
+nanoclaw groups
 ```
 
 You should see registered groups. If NanoClaw isn't running or the database doesn't exist yet, the list will be empty — that's fine.
@@ -75,175 +75,175 @@ You should see registered groups. If NanoClaw isn't running or the database does
 
 ```bash
 # Send a prompt to the main group (canonical form)
-claw agent "What's on my calendar today?"
+nanoclaw agent "What's on my calendar today?"
 
 # Short form also works
-claw "What's on my calendar today?"
+nanoclaw "What's on my calendar today?"
 
 # Send to a specific group by name (fuzzy match)
-claw agent -g "family" "Remind everyone about dinner at 7"
+nanoclaw agent -g "family" "Remind everyone about dinner at 7"
 
 # Send to a group by exact JID
-claw agent -j "120363336345536173@g.us" "Hello"
+nanoclaw agent -j "120363336345536173@g.us" "Hello"
 
 # Resume a previous session
-claw agent -s abc123 "Continue where we left off"
+nanoclaw agent -s abc123 "Continue where we left off"
 
 # Read prompt from stdin
-echo "Summarize this" | claw agent --pipe -g dev
+echo "Summarize this" | nanoclaw agent --pipe -g dev
 
 # Pipe a file
-cat report.txt | claw agent --pipe "Summarize this report"
+cat report.txt | nanoclaw agent --pipe "Summarize this report"
 
 # List all registered groups
-claw agent --list-groups
+nanoclaw agent --list-groups
 
 # Force a specific runtime
-claw agent --runtime docker "Hello"
+nanoclaw agent --runtime docker "Hello"
 
 # Use a custom image tag (e.g. after rebuilding with a new tag)
-claw agent --image nanoclaw-agent:dev "Hello"
+nanoclaw agent --image nanoclaw-agent:dev "Hello"
 
 # Verbose mode (debug info, secrets redacted)
-claw agent -v "Hello"
+nanoclaw agent -v "Hello"
 
 # Custom timeout for long-running tasks
-claw agent --timeout 600 "Run the full analysis"
+nanoclaw agent --timeout 600 "Run the full analysis"
 
 # Read prompt from a file
-claw agent -f tasks.txt
+nanoclaw agent -f tasks.txt
 
 # Prefix the file contents with an inline instruction
-claw agent "Summarize this:" -f report.txt
+nanoclaw agent "Summarize this:" -f report.txt
 ```
 
-### Container management (claw ps)
+### Container management (nanoclaw ps)
 
 ```bash
 # List all running NanoClaw containers
-claw ps
+nanoclaw ps
 
 # Filter by name substring
-claw ps main
+nanoclaw ps main
 
 # Also show unnamed/zombie containers
-claw ps --all
+nanoclaw ps --all
 
 # Dump logs for all named containers
-claw ps --logs
+nanoclaw ps --logs
 
 # Dump logs for containers matching "main"
-claw ps --logs main
+nanoclaw ps --logs main
 
 # Follow logs (multiplexed, Ctrl-C to stop)
-claw ps --tail
+nanoclaw ps --tail
 
 # Remove stale unnamed containers
-claw ps --kill-zombies
+nanoclaw ps --kill-zombies
 
 # Stop and remove a specific stuck container (NanoClaw may re-process the pending message)
-claw ps --restart main
+nanoclaw ps --restart main
 ```
 
-### Session management (claw sessions)
+### Session management (nanoclaw sessions)
 
 ```bash
 # List all groups with a saved session ID
-claw sessions
+nanoclaw sessions
 
 # Filter by group name or folder substring
-claw sessions main
+nanoclaw sessions main
 ```
 
 Use the session ID with `-s` to resume a previous conversation:
 
 ```bash
-claw -s <session-id> "Continue where we left off"
+nanoclaw -s <session-id> "Continue where we left off"
 ```
 
-### Message history (claw history)
+### Message history (nanoclaw history)
 
 ```bash
 # Last 20 messages for the main group
-claw history
+nanoclaw history
 
 # Last 20 messages for a specific group (fuzzy match)
-claw history -g family
+nanoclaw history -g family
 
 # Show more messages
-claw history -n 50
+nanoclaw history -n 50
 
 # By exact JID
-claw history -j "120363336345536173@g.us"
+nanoclaw history -j "120363336345536173@g.us"
 ```
 
-### Live message tail (claw watch)
+### Live message tail (nanoclaw watch)
 
 ```bash
 # Watch the main group in real time (Ctrl-C to stop)
-claw watch
+nanoclaw watch
 
 # Watch a specific group
-claw watch -g family
+nanoclaw watch -g family
 
 # Faster poll interval (default is 2s)
-claw watch -n 1
+nanoclaw watch -n 1
 ```
 
-### Group management (claw groups)
+### Group management (nanoclaw groups)
 
 ```bash
 # List registered groups
-claw groups
+nanoclaw groups
 
 # Register a new group
-claw groups add "120363336345536173@g.us" --name "My Group"
+nanoclaw groups add "120363336345536173@g.us" --name "My Group"
 
 # Register with a custom folder and agent name
-claw groups add "120363336345536173@g.us" --name "My Group" --folder my-group --agent-name "Andy"
+nanoclaw groups add "120363336345536173@g.us" --name "My Group" --folder my-group --agent-name "Andy"
 
 # Mark as the main group
-claw groups add "120363336345536173@g.us" --name "My Group" --main
+nanoclaw groups add "120363336345536173@g.us" --name "My Group" --main
 
 # Remove a group (prompts for confirmation; group folder on disk is preserved)
-claw groups remove "My Group"
+nanoclaw groups remove "My Group"
 ```
 
-### Rebuilding the container image (claw rebuild)
+### Rebuilding the container image (nanoclaw rebuild)
 
 ```bash
 # Rebuild with the default tag (nanoclaw-agent:latest)
-claw rebuild
+nanoclaw rebuild
 
 # Build with a custom tag
-claw rebuild --tag dev
+nanoclaw rebuild --tag dev
 
 # Prune builder cache first, then rebuild (use when COPY steps serve stale files)
-claw rebuild --clean
+nanoclaw rebuild --clean
 ```
 
-### Migration (claw molt)
+### Migration (nanoclaw molt)
 
 Requires [molt](https://github.com/kenbolton/molt) installed and available in `PATH`.
 
 ```bash
 # Export this NanoClaw install to a bundle (source defaults to NANOCLAW_DIR)
-claw molt export --out ~/my-nanoclaw.molt
+nanoclaw molt export --out ~/my-nanoclaw.molt
 
 # Import a bundle into this install (dest and --arch default to this install)
-claw molt import ~/my-nanoclaw.molt
+nanoclaw molt import ~/my-nanoclaw.molt
 
 # Import with folder renames
-claw molt import ~/my-nanoclaw.molt --rename family=household
+nanoclaw molt import ~/my-nanoclaw.molt --rename family=household
 
 # Dry run
-claw molt import ~/my-nanoclaw.molt --dry-run
+nanoclaw molt import ~/my-nanoclaw.molt --dry-run
 
 # List available molt drivers
-claw molt archs
+nanoclaw molt archs
 
 # Pass any other molt command through directly
-claw molt --help
+nanoclaw molt --help
 ```
 
 ## Troubleshooting
@@ -262,15 +262,15 @@ The default timeout is 300 seconds. For longer tasks, pass `--timeout 600` (or h
 
 ### "group not found"
 
-Run `claw agent --list-groups` (or `claw groups`) to see what's registered. Group lookup does a fuzzy partial match on name and folder — if your query matches multiple groups, you'll get an error listing the ambiguous matches.
+Run `nanoclaw agent --list-groups` (or `nanoclaw groups`) to see what's registered. Group lookup does a fuzzy partial match on name and folder — if your query matches multiple groups, you'll get an error listing the ambiguous matches.
 
 ### Container crashes mid-stream
 
-Containers run with `--rm` so they are automatically removed. If the agent crashes before emitting the output sentinel, `claw` falls back to printing raw stdout. Use `-v` to see what the container produced. Rebuild the image with `./container/build.sh` if crashes are consistent.
+Containers run with `--rm` so they are automatically removed. If the agent crashes before emitting the output sentinel, `nanoclaw` falls back to printing raw stdout. Use `-v` to see what the container produced. Rebuild the image with `./container/build.sh` if crashes are consistent.
 
 ### Override the NanoClaw directory
 
-If `claw` can't find your database or `.env`, set the `NANOCLAW_DIR` environment variable:
+If `nanoclaw` can't find your database or `.env`, set the `NANOCLAW_DIR` environment variable:
 
 ```bash
 export NANOCLAW_DIR=/path/to/your/nanoclaw

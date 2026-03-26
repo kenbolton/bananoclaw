@@ -5,9 +5,9 @@ import { spawnSync } from 'child_process';
 
 import { describe, expect, it } from 'vitest';
 
-describe('claw skill script', () => {
+describe('nanoclaw skill script', () => {
   it('exits zero after successful structured output even if the runtime is terminated', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claw-skill-test-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-skill-test-'));
     const binDir = path.join(tempDir, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
 
@@ -25,7 +25,7 @@ sleep 30
     const result = spawnSync(
       'python3',
       [
-        '.claude/skills/claw/scripts/claw',
+        '.claude/skills/nanoclaw/scripts/nanoclaw',
         'agent',
         '-j',
         'tg:123',

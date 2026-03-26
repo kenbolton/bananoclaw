@@ -1,36 +1,36 @@
 #!/usr/bin/env python3
 """
-claw — NanoClaw CLI
+nanoclaw — NanoClaw CLI
 Run a NanoClaw agent container from the command line.
 
 Usage:
-  claw "What is 2+2?"
-  claw -g <channel_name> "Review this code"
-  claw -g "<channel name with spaces>" "What's the latest issue?"
-  claw -j "<chatJid>" "Hello"
-  claw -g <channel_name> -s <session-id> "Continue"
-  claw --list-groups
-  echo "prompt text" | claw --pipe -g <channel_name>
-  cat prompt.txt | claw --pipe
-  claw -f tasks.txt               Read prompt from a file
-  claw ps                         List running NanoClaw containers
-  claw ps [filter]                Filter containers by name substring
-  claw ps --all                   Also show unnamed/zombie containers
-  claw ps --logs [filter]         Dump logs for matching containers
-  claw ps --tail [filter]         Follow logs (multiplexed, Ctrl-C to stop)
-  claw ps --kill-zombies          Stop and remove unnamed containers
-  claw ps --restart <name>        Stop and remove a specific named container
-  claw sessions [filter]          List groups with a saved session ID
-  claw history [-g group] [-n N]  Print recent messages for a group
-  claw watch [-g group]           Poll DB for new messages in real time
-  claw groups                     List registered groups
-  claw groups add <jid> --name .. Register a new group
-  claw groups remove <name>       Unregister a group
-  claw rebuild [--tag TAG]        Build the nanoclaw-agent container image
-  claw molt export [--out <file.molt>]         Export this install to a bundle
-  claw molt import <file.molt> [--rename k=v]  Import bundle into this install
-  claw molt archs                              List installed molt drivers
-  claw molt <args...>                          Passthrough to molt binary
+  nanoclaw "What is 2+2?"
+  nanoclaw -g <channel_name> "Review this code"
+  nanoclaw -g "<channel name with spaces>" "What's the latest issue?"
+  nanoclaw -j "<chatJid>" "Hello"
+  nanoclaw -g <channel_name> -s <session-id> "Continue"
+  nanoclaw --list-groups
+  echo "prompt text" | nanoclaw --pipe -g <channel_name>
+  cat prompt.txt | nanoclaw --pipe
+  nanoclaw -f tasks.txt               Read prompt from a file
+  nanoclaw ps                         List running NanoClaw containers
+  nanoclaw ps [filter]                Filter containers by name substring
+  nanoclaw ps --all                   Also show unnamed/zombie containers
+  nanoclaw ps --logs [filter]         Dump logs for matching containers
+  nanoclaw ps --tail [filter]         Follow logs (multiplexed, Ctrl-C to stop)
+  nanoclaw ps --kill-zombies          Stop and remove unnamed containers
+  nanoclaw ps --restart <name>        Stop and remove a specific named container
+  nanoclaw sessions [filter]          List groups with a saved session ID
+  nanoclaw history [-g group] [-n N]  Print recent messages for a group
+  nanoclaw watch [-g group]           Poll DB for new messages in real time
+  nanoclaw groups                     List registered groups
+  nanoclaw groups add <jid> --name .. Register a new group
+  nanoclaw groups remove <name>       Unregister a group
+  nanoclaw rebuild [--tag TAG]        Build the nanoclaw-agent container image
+  nanoclaw molt export [--out <file.molt>]         Export this install to a bundle
+  nanoclaw molt import <file.molt> [--rename k=v]  Import bundle into this install
+  nanoclaw molt archs                              List installed molt drivers
+  nanoclaw molt <args...>                          Passthrough to molt binary
 """
 
 import argparse
@@ -282,7 +282,7 @@ def cmd_molt(molt_args: list[str]) -> None:
 
     if subcmd == "import":
         # Parse just enough to fill in defaults; pass everything else through.
-        imp = argparse.ArgumentParser(prog="claw molt import", add_help=False)
+        imp = argparse.ArgumentParser(prog="nanoclaw molt import", add_help=False)
         imp.add_argument("bundle")
         imp.add_argument("dest", nargs="?")
         imp.add_argument("--arch")
@@ -785,7 +785,7 @@ def main():
     # ── claw history subcommand ───────────────────────────────────────────────
     if len(sys.argv) > 1 and sys.argv[1] == "history":
         hist_parser = argparse.ArgumentParser(
-            prog="claw history",
+            prog="nanoclaw history",
             description="Print recent messages for a group from the local database.",
         )
         hist_parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
@@ -799,7 +799,7 @@ def main():
     # ── claw watch subcommand ─────────────────────────────────────────────────
     if len(sys.argv) > 1 and sys.argv[1] == "watch":
         watch_parser = argparse.ArgumentParser(
-            prog="claw watch",
+            prog="nanoclaw watch",
             description="Poll the database for new messages and print them as they arrive.",
         )
         watch_parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
@@ -813,7 +813,7 @@ def main():
     # ── claw groups subcommand ────────────────────────────────────────────────
     if len(sys.argv) > 1 and sys.argv[1] == "groups":
         groups_parser = argparse.ArgumentParser(
-            prog="claw groups",
+            prog="nanoclaw groups",
             description="List, add, or remove registered groups.",
         )
         groups_sub = groups_parser.add_subparsers(dest="subcmd")
@@ -839,7 +839,7 @@ def main():
     # ── claw rebuild subcommand ───────────────────────────────────────────────
     if len(sys.argv) > 1 and sys.argv[1] == "rebuild":
         rb_parser = argparse.ArgumentParser(
-            prog="claw rebuild",
+            prog="nanoclaw rebuild",
             description="Build the nanoclaw-agent container image.",
         )
         rb_parser.add_argument("--tag", default="latest", help="Image tag (default: latest)")
@@ -855,7 +855,7 @@ def main():
     # ── claw ps subcommand ────────────────────────────────────────────────────
     if len(sys.argv) > 1 and sys.argv[1] == "ps":
         ps_parser = argparse.ArgumentParser(
-            prog="claw ps",
+            prog="nanoclaw ps",
             description="List and manage running NanoClaw containers.",
         )
         ps_parser.add_argument("filter", nargs="?", help="Substring filter for container names")
@@ -879,27 +879,63 @@ def main():
         cmd_ps(ps_args, runtime)
         return
 
+    # ── claw agent subcommand ─────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "agent":
+        sys.argv.pop(1)  # strip "agent"; remaining args parsed by argparse below
+    elif len(sys.argv) == 1:
+        # bare claw with no args: show help and exit cleanly
+        _help_parser = argparse.ArgumentParser(
+            prog="nanoclaw",
+            usage=(
+                "%(prog)s [options] [prompt]\n"
+                "       %(prog)s agent [options] [prompt]\n"
+                "       %(prog)s ps [--logs|--tail|--kill-zombies|--restart NAME] [filter]\n"
+                "       %(prog)s sessions|history|watch|groups|rebuild|molt [args]"
+            ),
+            description="Send a prompt to a NanoClaw agent, or manage your install.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            add_help=False,
+            epilog=(
+                "subcommands:\n"
+                "  claw agent [options] [prompt]      send a prompt (explicit form)\n"
+                "  claw ps [filter]                   list/manage running containers  (ps --help)\n"
+                "  claw ps --logs/--tail [filter]     dump or follow container logs\n"
+                "  claw ps --restart <name>           stop and remove a stuck container\n"
+                "  claw sessions [filter]             list saved session IDs\n"
+                "  claw history [-g group] [-n N]     show recent messages from the DB\n"
+                "  claw watch [-g group]              tail messages in real time\n"
+                "  claw groups [add|remove] ...       register or remove groups  (groups --help)\n"
+                "  claw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
+                "  claw molt <subcommand>             export/import via molt  (molt --help)\n"
+            ),
+        )
+        _help_parser.print_help()
+        sys.exit(0)
+    # else: flag or prompt passed directly — fall through to argparse (backward compat)
+
     parser = argparse.ArgumentParser(
-        prog="claw",
+        prog="nanoclaw",
         usage=(
             "%(prog)s [options] [prompt]\n"
+            "       %(prog)s agent [options] [prompt]\n"
             "       %(prog)s ps [--logs|--tail|--kill-zombies|--restart NAME] [filter]\n"
             "       %(prog)s sessions|history|watch|groups|rebuild|molt [args]"
         ),
-        description="Send a prompt to a NanoClaw agent, or manage your install.",
+        description="Send a prompt to a NanoClaw agent.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,
         epilog=(
             "subcommands:\n"
-            "  claw ps [filter]                  list/manage running containers  (ps --help)\n"
-            "  claw ps --logs/--tail [filter]    dump or follow container logs\n"
-            "  claw ps --restart <name>          stop and remove a stuck container\n"
-            "  claw sessions [filter]            list saved session IDs\n"
-            "  claw history [-g group] [-n N]    show recent messages from the DB\n"
-            "  claw watch [-g group]             tail messages in real time\n"
-            "  claw groups [add|remove] ...      register or remove groups  (groups --help)\n"
+            "  claw agent [options] [prompt]      send a prompt (explicit form)\n"
+            "  claw ps [filter]                   list/manage running containers  (ps --help)\n"
+            "  claw ps --logs/--tail [filter]     dump or follow container logs\n"
+            "  claw ps --restart <name>           stop and remove a stuck container\n"
+            "  claw sessions [filter]             list saved session IDs\n"
+            "  claw history [-g group] [-n N]     show recent messages from the DB\n"
+            "  claw watch [-g group]              tail messages in real time\n"
+            "  claw groups [add|remove] ...       register or remove groups  (groups --help)\n"
             "  claw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
-            "  claw molt <subcommand>            export/import via molt  (molt --help)\n"
+            "  claw molt <subcommand>             export/import via molt  (molt --help)\n"
         ),
     )
 

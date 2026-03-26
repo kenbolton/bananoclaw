@@ -879,27 +879,63 @@ def main():
         cmd_ps(ps_args, runtime)
         return
 
+    # ── claw agent subcommand ─────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "agent":
+        sys.argv.pop(1)  # strip "agent"; remaining args parsed by argparse below
+    elif len(sys.argv) == 1:
+        # bare claw with no args: show help and exit cleanly
+        _help_parser = argparse.ArgumentParser(
+            prog="claw",
+            usage=(
+                "%(prog)s [options] [prompt]\n"
+                "       %(prog)s agent [options] [prompt]\n"
+                "       %(prog)s ps [--logs|--tail|--kill-zombies|--restart NAME] [filter]\n"
+                "       %(prog)s sessions|history|watch|groups|rebuild|molt [args]"
+            ),
+            description="Send a prompt to a NanoClaw agent, or manage your install.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            add_help=False,
+            epilog=(
+                "subcommands:\n"
+                "  claw agent [options] [prompt]      send a prompt (explicit form)\n"
+                "  claw ps [filter]                   list/manage running containers  (ps --help)\n"
+                "  claw ps --logs/--tail [filter]     dump or follow container logs\n"
+                "  claw ps --restart <name>           stop and remove a stuck container\n"
+                "  claw sessions [filter]             list saved session IDs\n"
+                "  claw history [-g group] [-n N]     show recent messages from the DB\n"
+                "  claw watch [-g group]              tail messages in real time\n"
+                "  claw groups [add|remove] ...       register or remove groups  (groups --help)\n"
+                "  claw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
+                "  claw molt <subcommand>             export/import via molt  (molt --help)\n"
+            ),
+        )
+        _help_parser.print_help()
+        sys.exit(0)
+    # else: flag or prompt passed directly — fall through to argparse (backward compat)
+
     parser = argparse.ArgumentParser(
         prog="claw",
         usage=(
             "%(prog)s [options] [prompt]\n"
+            "       %(prog)s agent [options] [prompt]\n"
             "       %(prog)s ps [--logs|--tail|--kill-zombies|--restart NAME] [filter]\n"
             "       %(prog)s sessions|history|watch|groups|rebuild|molt [args]"
         ),
-        description="Send a prompt to a NanoClaw agent, or manage your install.",
+        description="Send a prompt to a NanoClaw agent.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,
         epilog=(
             "subcommands:\n"
-            "  claw ps [filter]                  list/manage running containers  (ps --help)\n"
-            "  claw ps --logs/--tail [filter]    dump or follow container logs\n"
-            "  claw ps --restart <name>          stop and remove a stuck container\n"
-            "  claw sessions [filter]            list saved session IDs\n"
-            "  claw history [-g group] [-n N]    show recent messages from the DB\n"
-            "  claw watch [-g group]             tail messages in real time\n"
-            "  claw groups [add|remove] ...      register or remove groups  (groups --help)\n"
+            "  claw agent [options] [prompt]      send a prompt (explicit form)\n"
+            "  claw ps [filter]                   list/manage running containers  (ps --help)\n"
+            "  claw ps --logs/--tail [filter]     dump or follow container logs\n"
+            "  claw ps --restart <name>           stop and remove a stuck container\n"
+            "  claw sessions [filter]             list saved session IDs\n"
+            "  claw history [-g group] [-n N]     show recent messages from the DB\n"
+            "  claw watch [-g group]              tail messages in real time\n"
+            "  claw groups [add|remove] ...       register or remove groups  (groups --help)\n"
             "  claw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
-            "  claw molt <subcommand>            export/import via molt  (molt --help)\n"
+            "  claw molt <subcommand>             export/import via molt  (molt --help)\n"
         ),
     )
 

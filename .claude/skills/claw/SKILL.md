@@ -1,6 +1,6 @@
 ---
 name: claw
-description: Install the claw CLI tool — run NanoClaw agent containers from the command line without opening a chat app.
+description: Install the claw CLI tool — send prompts to NanoClaw agents (`claw agent`) and manage your install from the command line.
 ---
 
 # claw — NanoClaw CLI
@@ -9,15 +9,15 @@ description: Install the claw CLI tool — run NanoClaw agent containers from th
 
 ## What it does
 
-- Send a prompt to any registered group by name, folder, or JID
+- `claw agent "…"` — send a prompt to any registered group (canonical form; `claw "…"` also works)
 - Default target is the main group (no `-g` needed for most use)
 - Resume a previous session with `-s <session-id>`
 - Read prompts from stdin (`--pipe`) for scripting and piping
-- List all registered groups with `--list-groups`
+- List all registered groups with `claw agent --list-groups`
 - Auto-detects `container` or `docker` runtime (or override with `--runtime`)
 - Prints the agent's response to stdout; session ID to stderr
 - Verbose mode (`-v`) shows the command, redacted payload, and exit code
-- `claw -f tasks.txt` — read prompt from a file (alternative to `--pipe`)
+- `claw agent -f tasks.txt` — read prompt from a file (alternative to `--pipe`)
 - `claw ps` — list, inspect, manage, and restart running NanoClaw containers
 - `claw sessions` — list groups with a saved session ID (for use with `-s`)
 - `claw history` — print recent messages for a group from the local database
@@ -66,7 +66,7 @@ source ~/.zshrc   # or ~/.bashrc
 ### 3. Verify
 
 ```bash
-claw --list-groups
+claw groups
 ```
 
 You should see registered groups. If NanoClaw isn't running or the database doesn't exist yet, the list will be empty — that's fine.
@@ -74,44 +74,47 @@ You should see registered groups. If NanoClaw isn't running or the database does
 ## Usage Examples
 
 ```bash
-# Send a prompt to the main group
+# Send a prompt to the main group (canonical form)
+claw agent "What's on my calendar today?"
+
+# Short form also works
 claw "What's on my calendar today?"
 
 # Send to a specific group by name (fuzzy match)
-claw -g "family" "Remind everyone about dinner at 7"
+claw agent -g "family" "Remind everyone about dinner at 7"
 
 # Send to a group by exact JID
-claw -j "120363336345536173@g.us" "Hello"
+claw agent -j "120363336345536173@g.us" "Hello"
 
 # Resume a previous session
-claw -s abc123 "Continue where we left off"
+claw agent -s abc123 "Continue where we left off"
 
 # Read prompt from stdin
-echo "Summarize this" | claw --pipe -g dev
+echo "Summarize this" | claw agent --pipe -g dev
 
 # Pipe a file
-cat report.txt | claw --pipe "Summarize this report"
+cat report.txt | claw agent --pipe "Summarize this report"
 
 # List all registered groups
-claw --list-groups
+claw agent --list-groups
 
 # Force a specific runtime
-claw --runtime docker "Hello"
+claw agent --runtime docker "Hello"
 
 # Use a custom image tag (e.g. after rebuilding with a new tag)
-claw --image nanoclaw-agent:dev "Hello"
+claw agent --image nanoclaw-agent:dev "Hello"
 
 # Verbose mode (debug info, secrets redacted)
-claw -v "Hello"
+claw agent -v "Hello"
 
 # Custom timeout for long-running tasks
-claw --timeout 600 "Run the full analysis"
+claw agent --timeout 600 "Run the full analysis"
 
 # Read prompt from a file
-claw -f tasks.txt
+claw agent -f tasks.txt
 
 # Prefix the file contents with an inline instruction
-claw "Summarize this:" -f report.txt
+claw agent "Summarize this:" -f report.txt
 ```
 
 ### Container management (claw ps)
@@ -259,7 +262,7 @@ The default timeout is 300 seconds. For longer tasks, pass `--timeout 600` (or h
 
 ### "group not found"
 
-Run `claw --list-groups` to see what's registered. Group lookup does a fuzzy partial match on name and folder — if your query matches multiple groups, you'll get an error listing the ambiguous matches.
+Run `claw agent --list-groups` (or `claw groups`) to see what's registered. Group lookup does a fuzzy partial match on name and folder — if your query matches multiple groups, you'll get an error listing the ambiguous matches.
 
 ### Container crashes mid-stream
 

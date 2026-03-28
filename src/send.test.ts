@@ -79,4 +79,13 @@ describe('sendAndStore', () => {
     expect(ch.sendMessage).toHaveBeenCalled();
     expect(mockStoreMessage).toHaveBeenCalledOnce();
   });
+
+  it('does not store when sendMessage fails', async () => {
+    const ch = mockChannel(false);
+    vi.mocked(ch.sendMessage).mockRejectedValueOnce(new Error('send failed'));
+    await expect(sendAndStore(ch, 'test@g.us', 'Hi', 'Andy')).rejects.toThrow(
+      'send failed',
+    );
+    expect(mockStoreMessage).not.toHaveBeenCalled();
+  });
 });

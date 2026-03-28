@@ -599,7 +599,8 @@ async function main(): Promise<void> {
         await sendAndStore(channel, chatJid, result.url, ASSISTANT_NAME);
       } else {
         await sendAndStore(
-          channel, chatJid,
+          channel,
+          chatJid,
           `Remote Control failed: ${result.error}`,
           ASSISTANT_NAME,
         );
@@ -607,7 +608,12 @@ async function main(): Promise<void> {
     } else {
       const result = stopRemoteControl();
       if (result.ok) {
-        await sendAndStore(channel, chatJid, 'Remote Control session ended.', ASSISTANT_NAME);
+        await sendAndStore(
+          channel,
+          chatJid,
+          'Remote Control session ended.',
+          ASSISTANT_NAME,
+        );
       } else {
         await sendAndStore(channel, chatJid, result.error, ASSISTANT_NAME);
       }

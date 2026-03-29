@@ -31,11 +31,28 @@ interface ContainerInput {
   script?: string;
 }
 
+/**
+ * Structured output emitted by agent-runner via sentinel markers
+ * (OUTPUT_START / OUTPUT_END). Parsed by container-runner.ts, native-runner.ts,
+ * and the Go claw-driver-nanoclaw agent.go.
+ *
+ * Token fields are cumulative across all turns within a query (or session,
+ * for session-update markers). They originate from the Anthropic SDK's
+ * result message `usage` object.
+ */
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Cumulative non-cached input tokens consumed. */
+  inputTokens?: number;
+  /** Cumulative output tokens generated. */
+  outputTokens?: number;
+  /** Cumulative input tokens served from the Anthropic prompt cache. */
+  cacheReadInputTokens?: number;
+  /** Cumulative input tokens written to the Anthropic prompt cache. */
+  cacheCreationInputTokens?: number;
 }
 
 interface SessionEntry {
@@ -338,7 +355,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; totalInputTokens: number; totalOutputTokens: number; totalCacheReadInputTokens: number; totalCacheCreationInputTokens: number }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -367,6 +384,13 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  // Per-query token accumulators. These sum usage from every result message
+  // in the SDK's query() iterator. Values are included in the writeOutput()
+  // sentinel and also rolled up into session-level totals in the outer loop.
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheReadInputTokens = 0;
+  let totalCacheCreationInputTokens = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -439,6 +463,17 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
+    // Accumulate token usage — the SDK puts usage on result messages
+    if ('usage' in message) {
+      const usage = (message as { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } }).usage;
+      if (usage) {
+        totalInputTokens += usage.input_tokens ?? 0;
+        totalOutputTokens += usage.output_tokens ?? 0;
+        totalCacheReadInputTokens += usage.cache_read_input_tokens ?? 0;
+        totalCacheCreationInputTokens += usage.cache_creation_input_tokens ?? 0;
+      }
+    }
+
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       log(`Session initialized: ${newSessionId}`);
@@ -456,14 +491,18 @@ async function runQuery(
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+        cacheReadInputTokens: totalCacheReadInputTokens,
+        cacheCreationInputTokens: totalCacheCreationInputTokens,
       });
     }
   }
 
   ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, inputTokens: ${totalInputTokens}, outputTokens: ${totalOutputTokens}, cacheRead: ${totalCacheReadInputTokens}, cacheCreation: ${totalCacheCreationInputTokens}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, totalInputTokens, totalOutputTokens, totalCacheReadInputTokens, totalCacheCreationInputTokens };
 }
 
 interface ScriptResult {
@@ -578,11 +617,22 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  // Session-level token accumulators. These sum per-query totals across the
+  // entire multi-turn session. Emitted in the session-update writeOutput()
+  // marker so the host (nanoclaw) can track cumulative usage.
+  let sessionInputTokens = 0;
+  let sessionOutputTokens = 0;
+  let sessionCacheReadInputTokens = 0;
+  let sessionCacheCreationInputTokens = 0;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
       const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      sessionInputTokens += queryResult.totalInputTokens;
+      sessionOutputTokens += queryResult.totalOutputTokens;
+      sessionCacheReadInputTokens += queryResult.totalCacheReadInputTokens;
+      sessionCacheCreationInputTokens += queryResult.totalCacheCreationInputTokens;
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -598,8 +648,8 @@ async function main(): Promise<void> {
         break;
       }
 
-      // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      // Emit session update so host can track it (include cumulative token usage)
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId, inputTokens: sessionInputTokens, outputTokens: sessionOutputTokens, cacheReadInputTokens: sessionCacheReadInputTokens, cacheCreationInputTokens: sessionCacheCreationInputTokens });
 
       log('Query ended, waiting for next IPC message...');
 

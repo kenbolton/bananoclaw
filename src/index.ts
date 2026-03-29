@@ -39,6 +39,7 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  insertRunUsage,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -369,12 +370,40 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
+  // Track whether we've already persisted usage for this run (to avoid
+  // double-writes from multiple streamed outputs with the same cumulative totals).
+  let usagePersisted = false;
+  const agentStart = Date.now();
+
+  // Wrap onOutput to track session ID and persist token usage from streamed results.
+  // Usage is persisted here (not after runContainerAgent resolves) because in
+  // streaming mode the container stays alive for the idle timeout — we want
+  // usage recorded as soon as the first result with tokens arrives.
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+        }
+        // Persist token usage on the first output that has non-zero tokens
+        if (!usagePersisted && output.inputTokens != null) {
+          const hasTokens = (output.inputTokens ?? 0) > 0 ||
+            (output.outputTokens ?? 0) > 0 ||
+            (output.cacheReadInputTokens ?? 0) > 0 ||
+            (output.cacheCreationInputTokens ?? 0) > 0;
+          if (hasTokens) {
+            usagePersisted = true;
+            insertRunUsage({
+              group_folder: group.folder,
+              chat_jid: chatJid,
+              completed_at: new Date().toISOString(),
+              duration_ms: Date.now() - agentStart,
+              input_tokens: output.inputTokens ?? 0,
+              output_tokens: output.outputTokens ?? 0,
+              cache_read_input_tokens: output.cacheReadInputTokens ?? 0,
+              cache_creation_input_tokens: output.cacheCreationInputTokens ?? 0,
+            });
+          }
         }
         await onOutput(output);
       }

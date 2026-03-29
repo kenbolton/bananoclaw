@@ -387,7 +387,8 @@ async function runAgent(
         }
         // Persist token usage on the first output that has non-zero tokens
         if (!usagePersisted && output.inputTokens != null) {
-          const hasTokens = (output.inputTokens ?? 0) > 0 ||
+          const hasTokens =
+            (output.inputTokens ?? 0) > 0 ||
             (output.outputTokens ?? 0) > 0 ||
             (output.cacheReadInputTokens ?? 0) > 0 ||
             (output.cacheCreationInputTokens ?? 0) > 0;
